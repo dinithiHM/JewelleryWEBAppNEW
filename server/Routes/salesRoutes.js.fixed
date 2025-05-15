@@ -1,0 +1,499 @@
+import express from 'express';
+import con from '../utils/db.js';
+import { fileURLToPath } from 'url';
+import path from 'path';
+
+// Get current directory
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const router = express.Router();
+
+// Get all sales with their items
+router.get("/", (req, res) => {
+  // Check if branch_id filter is provided
+  const branchId = req.query.branch_id;
+  const userId = req.query.user_id;
+
+  let sql = `
+    SELECT
+      s.sale_id,
+      s.customer_name,
+      s.total_amount,
+      s.payment_method,
+      s.sale_date,
+      i.invoice_number,
+      s.user_id,
+      u.first_name AS cashier_first_name,
+      u.last_name AS cashier_last_name,
+      s.branch_id,
+      b.branch_name
+    FROM
+      sales s
+    LEFT JOIN
+      invoices i ON s.sale_id = i.sale_id
+    LEFT JOIN
+      users u ON s.user_id = u.user_id
+    LEFT JOIN
+      branches b ON s.branch_id = b.branch_id
+  `;
+
+  // Add WHERE clause if filters are provided
+  const whereConditions = [];
+  const queryParams = [];
+
+  if (branchId) {
+    whereConditions.push('s.branch_id = ?');
+    queryParams.push(branchId);
+  }
+
+  if (userId) {
+    whereConditions.push('s.user_id = ?');
+    queryParams.push(userId);
+  }
+
+  if (whereConditions.length > 0) {
+    sql += ' WHERE ' + whereConditions.join(' AND ');
+  }
+
+  sql += ' ORDER BY s.sale_date DESC';
+
+  con.query(sql, queryParams, (err, results) => {
+    if (err) {
+      console.error("Error fetching sales:", err);
+      return res.status(500).json({ message: "Database error", error: err.message });
+    }
+    res.json(results || []);
+  });
+});
+
+// Get finance data (income and expenses) by period and branch
+// Important: This route must be defined BEFORE the /:id route to avoid being caught by it
+router.get("/finance", (req, res) => {
+  console.log('GET /sales/finance - Fetching finance data');
+
+  // Get query parameters
+  const period = req.query.period || 'monthly'; // 'daily' or 'monthly'
+  const branchId = req.query.branch_id; // Optional branch filter
+  const year = req.query.year || new Date().getFullYear(); // Default to current year
+  const month = req.query.month; // Optional month filter (1-12)
+
+  console.log(`Fetching ${period} finance data for year: ${year}${month ? ', month: ' + month : ''}${branchId ? ', branch: ' + branchId : ''}`);
+
+  let sql, groupBy;
+  const queryParams = [];
+
+  // Base query to get sales data
+  let baseQuery;
+
+  if (period === 'daily') {
+    baseQuery = `
+      SELECT
+        DATE(s.sale_date) as date,
+        s.branch_id,
+        b.branch_name,
+        SUM(s.total_amount) as income
+      FROM
+        sales s
+      LEFT JOIN
+        branches b ON s.branch_id = b.branch_id
+    `;
+  } else { // monthly
+    baseQuery = `
+      SELECT
+        CONCAT(YEAR(s.sale_date), '-', LPAD(MONTH(s.sale_date), 2, '0')) as date,
+        s.branch_id,
+        b.branch_name,
+        SUM(s.total_amount) as income
+      FROM
+        sales s
+      LEFT JOIN
+        branches b ON s.branch_id = b.branch_id
+    `;
+  }
+
+  // WHERE clause conditions
+  const whereConditions = [];
+
+  // Add year condition
+  whereConditions.push('YEAR(s.sale_date) = ?');
+  queryParams.push(year);
+
+  // Add month condition if provided
+  if (month) {
+    whereConditions.push('MONTH(s.sale_date) = ?');
+    queryParams.push(month);
+  }
+
+  // Add branch condition if provided
+  if (branchId) {
+    whereConditions.push('s.branch_id = ?');
+    queryParams.push(branchId);
+  }
+
+  // Add WHERE clause to base query
+  if (whereConditions.length > 0) {
+    baseQuery += ' WHERE ' + whereConditions.join(' AND ');
+  }
+
+  // Set GROUP BY based on period
+  if (period === 'daily') {
+    groupBy = 'date, s.branch_id, b.branch_name';
+  } else { // monthly
+    groupBy = 'date, s.branch_id, b.branch_name';
+  }
+
+  // Complete the query
+  sql = `
+    ${baseQuery}
+    GROUP BY ${groupBy}
+    ORDER BY date ASC
+  `;
+
+  console.log('Executing SQL:', sql);
+  console.log('With parameters:', queryParams);
+
+  con.query(sql, queryParams, (err, results) => {
+    if (err) {
+      console.error("Error fetching finance data:", err);
+      return res.status(500).json({ message: "Database error", error: err.message });
+    }
+    
+    // Process results to format for the chart
+    const formattedData = processFinanceData(results, period);
+    
+    res.json(formattedData);
+  });
+});
+
+// Get sale details by ID including items
+router.get("/:id", (req, res) => {
+  const saleId = req.params.id;
+
+  // Get sale details
+  const saleSql = `
+    SELECT
+      s.sale_id,
+      s.customer_name,
+      s.total_amount,
+      s.payment_method,
+      s.sale_date,
+      i.invoice_number,
+      s.user_id,
+      u.first_name AS cashier_first_name,
+      u.last_name AS cashier_last_name,
+      s.branch_id,
+      b.branch_name
+    FROM
+      sales s
+    LEFT JOIN
+      invoices i ON s.sale_id = i.sale_id
+    LEFT JOIN
+      users u ON s.user_id = u.user_id
+    LEFT JOIN
+      branches b ON s.branch_id = b.branch_id
+    WHERE
+      s.sale_id = ?
+  `;
+
+  con.query(saleSql, [saleId], (err, saleResults) => {
+    if (err) {
+      console.error("Error fetching sale:", err);
+      return res.status(500).json({ message: "Database error", error: err.message });
+    }
+
+    if (saleResults.length === 0) {
+      return res.status(404).json({ message: "Sale not found" });
+    }
+
+    // Get sale items
+    const itemsSql = `
+      SELECT
+        si.sale_item_id,
+        si.item_id,
+        ji.product_title,
+        ji.category,
+        si.quantity,
+        si.unit_price,
+        si.subtotal
+      FROM
+        sale_items si
+      LEFT JOIN
+        jewellery_items ji ON si.item_id = ji.item_id
+      WHERE
+        si.sale_id = ?
+    `;
+
+    con.query(itemsSql, [saleId], (err, itemsResults) => {
+      if (err) {
+        console.error("Error fetching sale items:", err);
+        return res.status(500).json({ message: "Database error", error: err.message });
+      }
+
+      // Combine sale and items
+      const sale = saleResults[0];
+      sale.items = itemsResults || [];
+
+      res.json(sale);
+    });
+  });
+});
+
+// Create a new sale
+router.post("/create", (req, res) => {
+  const { customer_name, total_amount, payment_method, items, user_id, branch_id } = req.body;
+
+  if (!customer_name || !total_amount || !payment_method || !items || !items.length) {
+    return res.status(400).json({ message: "Missing required fields" });
+  }
+
+  // Start transaction
+  con.beginTransaction(async (err) => {
+    if (err) {
+      console.error("Error starting transaction:", err);
+      return res.status(500).json({ message: "Database error", error: err.message });
+    }
+
+    try {
+      // Check if user_id and branch_id columns exist in sales table
+      const [hasUserIdColumn, hasBranchIdColumn] = await Promise.all([
+        new Promise((resolve) => {
+          con.query("SHOW COLUMNS FROM sales LIKE 'user_id'", (err, results) => {
+            resolve(results && results.length > 0);
+          });
+        }),
+        new Promise((resolve) => {
+          con.query("SHOW COLUMNS FROM sales LIKE 'branch_id'", (err, results) => {
+            resolve(results && results.length > 0);
+          });
+        })
+      ]);
+
+      // Prepare SQL based on available columns
+      let saleSql, saleParams;
+      
+      if (hasUserIdColumn && hasBranchIdColumn) {
+        // Both columns exist, use them
+        saleSql = "INSERT INTO sales (customer_name, total_amount, payment_method, user_id, branch_id) VALUES (?, ?, ?, ?, ?)";
+        saleParams = [customer_name, total_amount, payment_method, user_id, branch_id];
+      } else {
+        // Columns don't exist, use original schema
+        saleSql = "INSERT INTO sales (customer_name, total_amount, payment_method) VALUES (?, ?, ?)";
+        saleParams = [customer_name, total_amount, payment_method];
+      }
+      
+      // Insert sale
+      con.query(saleSql, saleParams, (err, saleResult) => {
+        if (err) {
+          return con.rollback(() => {
+            console.error("Error creating sale:", err);
+            res.status(500).json({ message: "Database error", error: err.message });
+          });
+        }
+
+        const saleId = saleResult.insertId;
+
+        // Insert sale items and update inventory
+        const insertItemPromises = items.map(item => {
+          return new Promise((resolve, reject) => {
+            // First check if the item exists in the jewellery_items table
+            console.log('Checking if item exists:', item.item_id);
+            con.query("SELECT * FROM jewellery_items WHERE item_id = ?", [item.item_id], (err, results) => {
+              if (err) {
+                console.error('Error checking item existence:', err);
+                return reject(err);
+              }
+
+              if (results.length === 0) {
+                console.error('Item not found in jewellery_items table:', item.item_id);
+                return reject(new Error(`Item with ID ${item.item_id} does not exist in the database`));
+              }
+
+              console.log('Item found in database:', results[0]);
+
+              // Insert sale item
+              const subtotal = item.quantity * item.unit_price;
+              const itemSql = "INSERT INTO sale_items (sale_id, item_id, quantity, unit_price, subtotal) VALUES (?, ?, ?, ?, ?)";
+              con.query(itemSql, [saleId, item.item_id, item.quantity, item.unit_price, subtotal], (err) => {
+                if (err) {
+                  return reject(err);
+                }
+
+                // Update inventory
+                const updateSql = "UPDATE jewellery_items SET in_stock = in_stock - ? WHERE item_id = ? AND in_stock >= ?";
+                con.query(updateSql, [item.quantity, item.item_id, item.quantity], (err, updateResult) => {
+                  if (err) {
+                    return reject(err);
+                  }
+
+                  if (updateResult.affectedRows === 0) {
+                    return reject(new Error('Insufficient stock for item ID ' + item.item_id));
+                  }
+
+                  resolve();
+                });
+              });
+            });
+          });
+        });
+
+        // Wait for all item insertions to complete
+        Promise.all(insertItemPromises)
+          .then(() => {
+            // Generate invoice number
+            const invoiceNumber = `INV-${new Date().getFullYear()}-${saleId.toString().padStart(4, '0')}`;
+            const invoiceSql = "INSERT INTO invoices (sale_id, invoice_number) VALUES (?, ?)";
+            
+            con.query(invoiceSql, [saleId, invoiceNumber], (err) => {
+              if (err) {
+                return con.rollback(() => {
+                  console.error("Error creating invoice:", err);
+                  res.status(500).json({ message: "Database error", error: err.message });
+                });
+              }
+
+              // Commit transaction
+              con.commit((err) => {
+                if (err) {
+                  return con.rollback(() => {
+                    console.error("Error committing transaction:", err);
+                    res.status(500).json({ message: "Database error", error: err.message });
+                  });
+                }
+
+                res.status(201).json({
+                  message: "Sale created successfully",
+                  sale_id: saleId,
+                  invoice_number: invoiceNumber
+                });
+              });
+            });
+          })
+          .catch((err) => {
+            con.rollback(() => {
+              console.error("Error processing items:", err);
+              res.status(500).json({ message: err.message });
+            });
+          });
+      });
+    } catch (error) {
+      con.rollback(() => {
+        console.error("Unexpected error:", error);
+        res.status(500).json({ message: "Server error", error: error.message });
+      });
+    }
+  });
+});
+
+// Simple test route
+router.get("/test", (_req, res) => {
+  console.log('GET /sales/test - Test route');
+  return res.json({ message: 'Sales router is working!' });
+});
+
+// Generate empty finance data (no sample data)
+function generateSampleFinanceData() {
+  // Return empty chart data with just the structure
+  return {
+    chartData: [],
+    branches: [
+      { id: 1, name: 'Mahiyangana Branch' },
+      { id: 2, name: 'Mahaoya Branch' }
+    ]
+  };
+}
+
+// Helper function to get month name
+function getMonthName(monthIndex) {
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return months[monthIndex];
+}
+
+// Helper function to process finance data for the chart
+function processFinanceData(results, period) {
+  // If no results, return empty data
+  if (!results || results.length === 0) {
+    return generateSampleFinanceData();
+  }
+
+  // Group data by date and branch
+  const groupedData = {};
+  const branches = new Set();
+
+  results.forEach(row => {
+    const date = new Date(row.date);
+    let key;
+
+    if (period === 'daily') {
+      key = date.toISOString().split('T')[0]; // YYYY-MM-DD
+    } else { // monthly
+      key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`; // YYYY-MM
+    }
+
+    if (!groupedData[key]) {
+      groupedData[key] = {
+        name: period === 'daily' ? key : getMonthName(date.getMonth()),
+        date: key
+      };
+    }
+
+    const branchKey = `branch_${row.branch_id}`;
+    groupedData[key][branchKey] = row.income;
+    branches.add(row.branch_id);
+
+    // Add to total income
+    groupedData[key].income = (groupedData[key].income || 0) + row.income;
+
+    // Add branch name
+    groupedData[key][`branch_${row.branch_id}_name`] = row.branch_name;
+  });
+
+  // Convert to array and sort by date
+  const chartData = Object.values(groupedData).sort((a, b) => a.date.localeCompare(b.date));
+
+  // Add expense data (for now, generate random expenses)
+  chartData.forEach(item => {
+    item.expense = Math.round(item.income * (0.4 + Math.random() * 0.3)); // 40-70% of income
+  });
+
+  return {
+    chartData,
+    branches: Array.from(branches).map(id => {
+      const branchName = results.find(r => r.branch_id === id)?.branch_name || `Branch ${id}`;
+      return { id, name: branchName };
+    })
+  };
+}
+
+// Get available jewellery items for sale
+router.get("/available-items", (_req, res) => {
+  console.log('GET /sales/available-items - Fetching available items');
+
+  // Directly query the jewellery_items table
+  try {
+    // Get all items for now to debug
+    const sql = "SELECT item_id, product_title, category, in_stock, selling_price FROM jewellery_items";
+    console.log('Executing SQL query:', sql);
+
+    con.query(sql, (err, results) => {
+      if (err) {
+        console.error("Error fetching available items:", err);
+        return res.status(500).json({ message: "Database error", error: err.message });
+      }
+
+      console.log(`Found ${results ? results.length : 0} items in jewellery_items table`);
+      if (results && results.length > 0) {
+        console.log('First item found:', JSON.stringify(results[0]));
+      } else {
+        console.log('No items found in jewellery_items table');
+      }
+
+      return res.json(results || []);
+    });
+  } catch (error) {
+    console.error('Unexpected error in /available-items route:', error);
+    return res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+export { router as salesRouter };
