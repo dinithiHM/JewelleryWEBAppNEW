@@ -45,54 +45,67 @@ router.get("/available", (req, res) => {
           makingChargesColumns = [];
         }
 
-        let baseColumns = `item_id, product_title, category, in_stock, selling_price,
-                           is_solid_gold, gold_carat, weight, assay_certificate`;
-
-        // Add making_charges and additional_materials_charges if they exist
-        if (makingChargesColumns.length > 0) {
-          baseColumns += `, making_charges, additional_materials_charges`;
-        }
-
-        if (branchColumnExists && branchId) {
-          // Filter by branch_id if the column exists and branch_id is provided
-          sql = `
-            SELECT ${baseColumns}
-            FROM jewellery_items
-            WHERE branch_id = ? OR branch_id IS NULL
-          `;
-          queryParams = [branchId];
-        } else {
-          // Get all items if branch_id column doesn't exist or branch_id is not provided
-          sql = `SELECT ${baseColumns} FROM jewellery_items`;
-        }
-
-        console.log('Executing SQL query:', sql, 'with params:', queryParams);
-
-        con.query(sql, queryParams, (err, results) => {
-          if (err) {
-            console.error("Error fetching available items:", err);
-            return res.status(500).json({ message: "Database error", error: err.message });
+        // Check if profit_percentage column exists
+        con.query("SHOW COLUMNS FROM jewellery_items LIKE 'profit_percentage'", (profitErr, profitPercentageColumns) => {
+          if (profitErr) {
+            console.error("Error checking for profit_percentage column:", profitErr);
+            profitPercentageColumns = [];
           }
 
-          console.log(`Found ${results ? results.length : 0} items in jewellery_items table`);
-          if (results && results.length > 0) {
-            console.log('First item found:', JSON.stringify(results[0]));
+          let baseColumns = `item_id, product_title, category, in_stock, selling_price,
+                             is_solid_gold, gold_carat, weight, assay_certificate`;
 
-            // Process results to ensure making_charges and additional_materials_charges are included
-            const processedResults = results.map(item => {
-              // Ensure making_charges and additional_materials_charges are included
-              return {
-                ...item,
-                making_charges: item.making_charges || 0,
-                additional_materials_charges: item.additional_materials_charges || 0
-              };
-            });
+          // Add making_charges and additional_materials_charges if they exist
+          if (makingChargesColumns.length > 0) {
+            baseColumns += `, making_charges, additional_materials_charges`;
+          }
 
-            return res.json(processedResults || []);
+          // Add profit_percentage if it exists
+          if (profitPercentageColumns.length > 0) {
+            baseColumns += `, profit_percentage`;
+          }
+
+          if (branchColumnExists && branchId) {
+            // Filter by branch_id if the column exists and branch_id is provided
+            sql = `
+              SELECT ${baseColumns}
+              FROM jewellery_items
+              WHERE branch_id = ? OR branch_id IS NULL
+            `;
+            queryParams = [branchId];
           } else {
-            console.log('No items found in jewellery_items table');
-            return res.json([]);
+            // Get all items if branch_id column doesn't exist or branch_id is not provided
+            sql = `SELECT ${baseColumns} FROM jewellery_items`;
           }
+
+          console.log('Executing SQL query:', sql, 'with params:', queryParams);
+
+          con.query(sql, queryParams, (err, results) => {
+            if (err) {
+              console.error("Error fetching available items:", err);
+              return res.status(500).json({ message: "Database error", error: err.message });
+            }
+
+            console.log(`Found ${results ? results.length : 0} items in jewellery_items table`);
+            if (results && results.length > 0) {
+              console.log('First item found:', JSON.stringify(results[0]));
+
+              // Process results to ensure making_charges, additional_materials_charges, and profit_percentage are included
+              const processedResults = results.map(item => {
+                return {
+                  ...item,
+                  making_charges: item.making_charges || 0,
+                  additional_materials_charges: item.additional_materials_charges || 0,
+                  profit_percentage: item.profit_percentage || 0
+                };
+              });
+
+              return res.json(processedResults || []);
+            } else {
+              console.log('No items found in jewellery_items table');
+              return res.json([]);
+            }
+          });
         });
       });
     });

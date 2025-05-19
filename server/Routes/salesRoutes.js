@@ -672,11 +672,55 @@ router.post("/create", (req, res) => {
                       return reject(err);
                     }
 
+                    // Check if the table has the profit_percentage column
+                    con.query("SHOW COLUMNS FROM sale_items LIKE 'profit_percentage'", (err, profitColumns) => {
+                      if (err) {
+                        return reject(err);
+                      }
+
                   let itemSql;
                   let itemParams;
 
-                  if (goldColumns.length > 0 && discountColumns.length > 0 && makingChargesColumns.length > 0) {
-                    // New schema with gold price, discount columns, and making charges columns
+                  if (goldColumns.length > 0 && discountColumns.length > 0 && makingChargesColumns.length > 0 && profitColumns.length > 0) {
+                    // New schema with gold price, discount columns, making charges columns, and profit_percentage
+                    itemSql = `
+                      INSERT INTO sale_items (
+                        sale_id, item_id, quantity, unit_price, original_price,
+                        discount_amount, discount_type, subtotal,
+                        gold_price_per_gram, gold_carat, gold_weight, is_gold_price_based,
+                        making_charges, additional_materials_charges, profit_percentage
+                      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    `;
+
+                    // Calculate subtotal including making charges and additional materials charges
+                    const totalWithCharges = subtotal +
+                      (item.making_charges || 0) +
+                      (item.additional_materials_charges || 0);
+
+                    // Use the profit_percentage from the item, or default to 15%
+                    const profitPercentage = item.profit_percentage !== undefined && item.profit_percentage > 0
+                      ? parseFloat(String(item.profit_percentage))
+                      : 15;
+
+                    itemParams = [
+                      saleId,
+                      item.item_id,
+                      item.quantity,
+                      item.unit_price,
+                      item.original_price || item.unit_price,
+                      item.discount_amount || null,
+                      item.discount_type || null,
+                      totalWithCharges, // Use the total with charges
+                      item.gold_price_per_gram || null,
+                      item.gold_carat || null,
+                      item.gold_weight || null,
+                      item.is_gold_price_based ? 1 : 0,
+                      item.making_charges || null,
+                      item.additional_materials_charges || null,
+                      profitPercentage
+                    ];
+                  } else if (goldColumns.length > 0 && discountColumns.length > 0 && makingChargesColumns.length > 0) {
+                    // New schema with gold price, discount columns, and making charges columns (but no profit_percentage)
                     itemSql = `
                       INSERT INTO sale_items (
                         sale_id, item_id, quantity, unit_price, original_price,
@@ -775,6 +819,7 @@ router.post("/create", (req, res) => {
                       resolve();
                     });
                   });
+                  }); // Close profit_percentage query
                   }); // Close makingChargesColumns query
                 });
               });

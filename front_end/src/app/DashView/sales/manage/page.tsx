@@ -34,7 +34,7 @@ const ManageSalePage = () => {
           </Link>
           
           {/* Sales Reports */}
-          <Link href="/DashView/reports">
+          {/* <Link href="/DashView/reports">
             <div className="bg-green-100 p-6 rounded-lg shadow hover:shadow-md transition-shadow flex flex-col items-center cursor-pointer">
               <BarChart size={48} className="text-green-500 mb-4" />
               <h3 className="text-xl font-bold mb-2">Sales Reports</h3>
@@ -42,10 +42,10 @@ const ManageSalePage = () => {
                 View sales reports, analytics and statistics
               </p>
             </div>
-          </Link>
+          </Link> */}
           
           {/* Inventory */}
-          <Link href="/DashView/jewellery-stock">
+          {/* <Link href="/DashView/jewellery-stock">
             <div className="bg-purple-100 p-6 rounded-lg shadow hover:shadow-md transition-shadow flex flex-col items-center cursor-pointer">
               <ShoppingBag size={48} className="text-purple-500 mb-4" />
               <h3 className="text-xl font-bold mb-2">Inventory</h3>
@@ -53,7 +53,7 @@ const ManageSalePage = () => {
                 Manage jewellery inventory and stock levels
               </p>
             </div>
-          </Link>
+          </Link> */}
         </div>
       </div>
     </div>

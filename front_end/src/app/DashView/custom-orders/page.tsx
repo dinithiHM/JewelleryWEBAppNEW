@@ -32,9 +32,12 @@ interface CustomOrder {
   order_date: string;
   estimated_completion_date: string | null;
   estimated_amount: number;
+  profit_percentage?: number;
   advance_amount: number;
   balance_amount: number;
-  order_status: 'Pending' | 'In Progress' | 'Completed' | 'Delivered' | 'Cancelled';
+  total_amount_with_profit?: number;
+  balance_with_profit?: number;
+  order_status: 'Pending' | 'In Progress' | 'Completed' | 'Picked Up' | 'Delivered' | 'Cancelled';
   payment_status: 'Not Paid' | 'Partially Paid' | 'Fully Paid' | 'Completed';
   category_name: string | null;
   description: string | null;
@@ -49,6 +52,7 @@ interface CustomOrder {
   min_balance?: number | null;
   latest_payment_status?: string | null;
   current_payment_status?: string | null;
+  quantity?: number; // Added quantity property
 }
 
 const CustomOrdersPage = () => {
@@ -356,6 +360,8 @@ const CustomOrdersPage = () => {
         return 'bg-green-100 text-green-800';
       case 'In Progress':
         return 'bg-blue-100 text-blue-800';
+      case 'Picked Up':
+        return 'bg-indigo-100 text-indigo-800';
       case 'Delivered':
         return 'bg-purple-100 text-purple-800';
       case 'Cancelled':
@@ -387,6 +393,8 @@ const CustomOrdersPage = () => {
         return <CheckCircle size={16} className="mr-1" />;
       case 'In Progress':
         return <Clock size={16} className="mr-1" />;
+      case 'Picked Up':
+        return <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>;
       case 'Delivered':
         return <Truck size={16} className="mr-1" />;
       case 'Cancelled':
@@ -528,7 +536,7 @@ const CustomOrdersPage = () => {
                   <option value="Pending">Pending</option>
                   <option value="In Progress">In Progress</option>
                   <option value="Completed">Completed</option>
-                  <option value="Delivered">Delivered</option>
+                  <option value="Picked Up">Picked Up</option>
                   <option value="Cancelled">Cancelled</option>
                 </select>
               </div>
@@ -738,8 +746,22 @@ const CustomOrdersPage = () => {
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center">
                         <LKRIcon className="h-5 w-5 text-gray-400 mr-1" />
-                        <span>{formatCurrency(order.estimated_amount)}</span>
+                        <span>
+                          {userRole === 'supplier'
+                            ? formatCurrency(order.quantity ? order.estimated_amount * order.quantity : order.estimated_amount)
+                            : formatCurrency(order.total_amount_with_profit ||
+                                (order.profit_percentage
+                                  ? (order.estimated_amount * (1 + order.profit_percentage / 100)) * (order.quantity || 1)
+                                  : order.estimated_amount * (order.quantity || 1))
+                              )
+                          }
+                        </span>
                       </div>
+                      {userRole !== 'supplier' && order.profit_percentage && (
+                        <div className="text-xs text-gray-500 mt-1">
+                          Incl. {order.profit_percentage}% profit
+                        </div>
+                      )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       {formatDate(order.estimated_completion_date)}
@@ -782,7 +804,15 @@ const CustomOrdersPage = () => {
                           <div className="text-xs mt-1">
                             <span className="flex items-center">
                               <LKRIcon className="h-3 w-3 mr-1" />
-                              {formatCurrency(order.total_paid || order.advance_amount)} / {formatCurrency(order.estimated_amount)}
+                              {formatCurrency(order.total_paid || order.advance_amount)} /
+                              {userRole === 'supplier'
+                                ? formatCurrency(order.quantity ? order.estimated_amount * order.quantity : order.estimated_amount)
+                                : formatCurrency(order.total_amount_with_profit ||
+                                    (order.profit_percentage
+                                      ? (order.estimated_amount * (1 + order.profit_percentage / 100)) * (order.quantity || 1)
+                                      : order.estimated_amount * (order.quantity || 1))
+                                  )
+                              }
                             </span>
                             {order.payment_count > 0 && (
                               <span className="text-xs text-gray-600 mt-0.5">{order.payment_count} {order.payment_count === 1 ? 'payment' : 'payments'}</span>

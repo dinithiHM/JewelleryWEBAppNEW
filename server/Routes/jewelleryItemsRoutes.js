@@ -114,6 +114,7 @@ router.post("/create", (req, res) => {
     in_stock,
     buying_price,
     selling_price,
+    profit_percentage,
     branch_id,
     gold_carat,
     weight,
@@ -131,6 +132,14 @@ router.post("/create", (req, res) => {
     return res.status(400).json({ message: "Missing required fields" });
   }
 
+  // Calculate profit percentage if not provided
+  let calculatedProfitPercentage = profit_percentage;
+  if (calculatedProfitPercentage === undefined && buying_price > 0) {
+    calculatedProfitPercentage = ((selling_price - buying_price) / buying_price) * 100;
+    // Limit to 15%
+    calculatedProfitPercentage = Math.min(calculatedProfitPercentage, 15);
+  }
+
   const sql = `
     INSERT INTO jewellery_items (
       product_title,
@@ -138,6 +147,7 @@ router.post("/create", (req, res) => {
       in_stock,
       buying_price,
       selling_price,
+      profit_percentage,
       branch_id,
       gold_carat,
       weight,
@@ -146,7 +156,7 @@ router.post("/create", (req, res) => {
       making_charges,
       additional_materials_charges,
       product_added
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
   `;
 
   const values = [
@@ -155,6 +165,7 @@ router.post("/create", (req, res) => {
     in_stock,
     buying_price,
     selling_price,
+    calculatedProfitPercentage !== undefined ? parseFloat(calculatedProfitPercentage.toFixed(2)) : null,
     branch_id || null, // Default to null if branch_id is not provided
     gold_carat || null,
     weight || null,
@@ -186,6 +197,7 @@ router.put("/update/:id", (req, res) => {
     in_stock,
     buying_price,
     selling_price,
+    profit_percentage,
     branch_id,
     gold_carat,
     weight,
@@ -203,6 +215,14 @@ router.put("/update/:id", (req, res) => {
     return res.status(400).json({ message: "Missing required fields" });
   }
 
+  // Calculate profit percentage if not provided
+  let calculatedProfitPercentage = profit_percentage;
+  if (calculatedProfitPercentage === undefined && buying_price > 0) {
+    calculatedProfitPercentage = ((selling_price - buying_price) / buying_price) * 100;
+    // Limit to 15%
+    calculatedProfitPercentage = Math.min(calculatedProfitPercentage, 15);
+  }
+
   const sql = `
     UPDATE jewellery_items
     SET
@@ -211,6 +231,7 @@ router.put("/update/:id", (req, res) => {
       in_stock = ?,
       buying_price = ?,
       selling_price = ?,
+      profit_percentage = ?,
       branch_id = ?,
       gold_carat = ?,
       weight = ?,
@@ -228,6 +249,7 @@ router.put("/update/:id", (req, res) => {
     in_stock,
     buying_price,
     selling_price,
+    calculatedProfitPercentage !== undefined ? parseFloat(calculatedProfitPercentage.toFixed(2)) : null,
     branch_id || null, // Default to null if branch_id is not provided
     gold_carat || null,
     weight || null,

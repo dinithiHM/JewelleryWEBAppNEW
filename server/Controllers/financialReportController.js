@@ -76,7 +76,7 @@ export const getFinancialReport = async (req, res) => {
     // Get sales revenue
     const salesRevenueQuery = `
       SELECT
-        SUM(total_amount) AS totalSalesRevenue,
+        COALESCE(SUM(total_amount), 0) AS totalSalesRevenue,
         COUNT(*) AS totalSalesCount
       FROM sales s
       WHERE sale_date BETWEEN ? AND ? ${branchFilter}
@@ -90,10 +90,25 @@ export const getFinancialReport = async (req, res) => {
     );
     console.log('Sales revenue result:', salesRevenue);
 
+    // Get individual sales for debugging
+    const individualSalesQuery = `
+      SELECT sale_id, customer_name, total_amount, sale_date
+      FROM sales s
+      WHERE sale_date BETWEEN ? AND ? ${branchFilter}
+      ORDER BY sale_date DESC
+      LIMIT 10
+    `;
+
+    const [individualSales] = await con.promise().query(
+      individualSalesQuery,
+      [dateRange.startDate, dateRange.endDate, ...branchParams]
+    );
+    console.log('Individual sales (up to 10):', individualSales);
+
     // Get advance payments revenue
     const advancePaymentsQuery = `
       SELECT
-        SUM(advance_amount) AS totalAdvancePayments,
+        COALESCE(SUM(advance_amount), 0) AS totalAdvancePayments,
         COUNT(*) AS totalAdvancePaymentsCount
       FROM advance_payments ap
       WHERE payment_date BETWEEN ? AND ? ${branchFilter ? 'AND ap.branch_id = ?' : ''}
@@ -107,13 +122,29 @@ export const getFinancialReport = async (req, res) => {
     );
     console.log('Advance payments result:', advancePayments);
 
-    // Get orders revenue
+    // Get individual advance payments for debugging
+    const individualAdvancePaymentsQuery = `
+      SELECT payment_id, customer_name, advance_amount, payment_date
+      FROM advance_payments ap
+      WHERE payment_date BETWEEN ? AND ? ${branchFilter ? 'AND ap.branch_id = ?' : ''}
+      ORDER BY payment_date DESC
+      LIMIT 10
+    `;
+
+    const [individualAdvancePayments] = await con.promise().query(
+      individualAdvancePaymentsQuery,
+      [dateRange.startDate, dateRange.endDate, ...branchParams]
+    );
+    console.log('Individual advance payments (up to 10):', individualAdvancePayments);
+
+    // Get orders revenue - using order_items table for total_amount
     const ordersRevenueQuery = `
       SELECT
-        SUM(total_amount) AS totalOrdersRevenue,
-        COUNT(*) AS totalOrdersCount
+        COALESCE(SUM(oi.total_amount), 0) AS totalOrdersRevenue,
+        COUNT(DISTINCT o.order_id) AS totalOrdersCount
       FROM orders o
-      WHERE created_at BETWEEN ? AND ? ${branchFilter ? 'AND o.branch_id = ?' : ''}
+      LEFT JOIN order_items oi ON o.order_id = oi.order_id
+      WHERE o.created_at BETWEEN ? AND ? ${branchFilter ? 'AND o.branch_id = ?' : ''}
     `;
     console.log('Orders revenue query:', ordersRevenueQuery);
     console.log('Orders revenue params:', [dateRange.startDate, dateRange.endDate, ...branchParams]);
@@ -124,11 +155,27 @@ export const getFinancialReport = async (req, res) => {
     );
     console.log('Orders revenue result:', ordersRevenue);
 
+    // Get individual orders for debugging
+    const individualOrdersQuery = `
+      SELECT o.order_id, o.created_at, oi.total_amount
+      FROM orders o
+      LEFT JOIN order_items oi ON o.order_id = oi.order_id
+      WHERE o.created_at BETWEEN ? AND ? ${branchFilter ? 'AND o.branch_id = ?' : ''}
+      ORDER BY o.created_at DESC
+      LIMIT 10
+    `;
+
+    const [individualOrders] = await con.promise().query(
+      individualOrdersQuery,
+      [dateRange.startDate, dateRange.endDate, ...branchParams]
+    );
+    console.log('Individual orders (up to 10):', individualOrders);
+
     // 2. Revenue by time period (daily)
     const revenueByDayQuery = `
       SELECT
         DATE(sale_date) AS date,
-        SUM(total_amount) AS amount
+        COALESCE(SUM(total_amount), 0) AS amount
       FROM sales s
       WHERE sale_date BETWEEN ? AND ? ${branchFilter}
       GROUP BY DATE(sale_date)
@@ -144,7 +191,7 @@ export const getFinancialReport = async (req, res) => {
       SELECT
         payment_method,
         COUNT(*) AS count,
-        SUM(total_amount) AS amount
+        COALESCE(SUM(total_amount), 0) AS amount
       FROM sales s
       WHERE sale_date BETWEEN ? AND ? ${branchFilter}
       GROUP BY payment_method
@@ -161,7 +208,7 @@ export const getFinancialReport = async (req, res) => {
         b.branch_id,
         b.branch_name,
         COUNT(s.sale_id) AS count,
-        SUM(s.total_amount) AS amount
+        COALESCE(SUM(s.total_amount), 0) AS amount
       FROM sales s
       JOIN branches b ON s.branch_id = b.branch_id
       WHERE s.sale_date BETWEEN ? AND ? ${branchFilter}
@@ -176,10 +223,11 @@ export const getFinancialReport = async (req, res) => {
     // 5. Profit Margin Analysis (if buying_price is available)
     const profitMarginQuery = `
       SELECT
-        SUM(ji.selling_price - ji.buying_price) AS totalProfit,
-        AVG((ji.selling_price - ji.buying_price) / ji.selling_price * 100) AS averageProfitMargin
+        COALESCE(SUM(ji.selling_price - ji.buying_price), 0) AS totalProfit,
+        COALESCE(AVG((ji.selling_price - ji.buying_price) / ji.selling_price * 100), 0) AS averageProfitMargin
       FROM jewellery_items ji
-      JOIN sales s ON s.sale_date BETWEEN ? AND ? ${branchFilter}
+      JOIN sale_items si ON ji.item_id = si.item_id
+      JOIN sales s ON s.sale_id = si.sale_id AND s.sale_date BETWEEN ? AND ? ${branchFilter}
       WHERE ji.branch_id = s.branch_id
     `;
     const [profitMargin] = await con.promise().query(
@@ -199,26 +247,39 @@ export const getFinancialReport = async (req, res) => {
     };
 
     // Prepare and send response
+    // Convert revenue values to numbers to ensure proper calculation
+    const salesRevenueValue = Number(salesRevenue[0]?.totalSalesRevenue) || 0;
+    const advancePaymentsValue = Number(advancePayments[0]?.totalAdvancePayments) || 0;
+    const ordersRevenueValue = Number(ordersRevenue[0]?.totalOrdersRevenue) || 0;
+
+    // Calculate total revenue
+    const totalRevenue = salesRevenueValue + advancePaymentsValue + ordersRevenueValue;
+
+    console.log('Revenue calculation:', {
+      salesRevenueValue,
+      advancePaymentsValue,
+      ordersRevenueValue,
+      totalRevenue
+    });
+
     const response = {
       period,
       dateRange,
       branches,
       selectedBranch: branchId,
       revenue: {
-        sales: salesRevenue[0]?.totalSalesRevenue || 0,
-        advancePayments: advancePayments[0]?.totalAdvancePayments || 0,
-        orders: ordersRevenue[0]?.totalOrdersRevenue || 0,
-        total: (salesRevenue[0]?.totalSalesRevenue || 0) +
-               (advancePayments[0]?.totalAdvancePayments || 0) +
-               (ordersRevenue[0]?.totalOrdersRevenue || 0)
+        sales: salesRevenueValue,
+        advancePayments: advancePaymentsValue,
+        orders: ordersRevenueValue,
+        total: totalRevenue
       },
       transactions: {
-        sales: salesRevenue[0]?.totalSalesCount || 0,
-        advancePayments: advancePayments[0]?.totalAdvancePaymentsCount || 0,
-        orders: ordersRevenue[0]?.totalOrdersCount || 0,
-        total: (salesRevenue[0]?.totalSalesCount || 0) +
-               (advancePayments[0]?.totalAdvancePaymentsCount || 0) +
-               (ordersRevenue[0]?.totalOrdersCount || 0)
+        sales: Number(salesRevenue[0]?.totalSalesCount) || 0,
+        advancePayments: Number(advancePayments[0]?.totalAdvancePaymentsCount) || 0,
+        orders: Number(ordersRevenue[0]?.totalOrdersCount) || 0,
+        total: (Number(salesRevenue[0]?.totalSalesCount) || 0) +
+               (Number(advancePayments[0]?.totalAdvancePaymentsCount) || 0) +
+               (Number(ordersRevenue[0]?.totalOrdersCount) || 0)
       },
       revenueByDay,
       revenueByPaymentMethod,

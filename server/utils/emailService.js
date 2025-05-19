@@ -8,7 +8,7 @@ const emailConfig = {
   auth: {
     user: 'slankajewel@gmail.com',
     // Make sure this is the correct App Password from Google Account
-    pass: 'viun mrlu hwfc nbxg'  
+    pass: 'viun mrlu hwfc nbxg'
   },
   // Add these options to help with Gmail connectivity
   tls: {
@@ -235,7 +235,7 @@ export const sendOrderStatusUpdate = async (order, customerEmail, newStatus) => 
         <p><strong>Updated On:</strong> ${new Date().toLocaleDateString()}</p>
       </div>
 
-      ${getStatusMessage(newStatus)}
+      ${getStatusMessage(newStatus, order)}
 
       <p>If you have any questions about your order, please contact our customer service.</p>
 
@@ -257,14 +257,28 @@ export const sendOrderStatusUpdate = async (order, customerEmail, newStatus) => 
 /**
  * Get a message based on the order status
  * @param {string} status - Order status
+ * @param {Object} order - Order details (optional)
  * @returns {string} - HTML message
  */
-const getStatusMessage = (status) => {
+const getStatusMessage = (status, order = null) => {
   switch (status.toLowerCase()) {
     case 'processing':
       return `<p>Your order is now being processed. We'll update you when it's ready.</p>`;
     case 'completed':
-      return `<p>Great news! Your order has been completed and is ready for pickup or delivery.</p>`;
+      if (order && order.pickup_location) {
+        // For custom orders with pickup location
+        let message = `<p>Great news! Your custom order has been completed and is ready for pickup at <strong>${order.pickup_location}</strong>.</p>`;
+
+        // Add information about remaining balance if any
+        if (order.remaining_balance && order.remaining_balance > 0) {
+          message += `<p>Please note that there is a remaining balance of <strong>Rs. ${order.remaining_balance.toLocaleString()}</strong> to be paid when you pick up your order.</p>`;
+        }
+
+        return message;
+      } else {
+        // Default completed message
+        return `<p>Great news! Your order has been completed and is ready for pickup or delivery.</p>`;
+      }
     case 'cancelled':
       return `<p>Your order has been cancelled. If you didn't request this cancellation, please contact our customer service immediately.</p>`;
     default:
@@ -281,8 +295,18 @@ const getStatusMessage = (status) => {
 export const sendCustomOrderPaymentReminder = async (order, customerEmail) => {
   const subject = `Payment Reminder for Custom Order #${order.order_id}`;
 
-  // Calculate remaining balance
-  const totalAmount = Number(order.estimated_amount) || 0;
+  // Calculate total amount with profit and quantity
+  const baseAmount = Number(order.estimated_amount) || 0;
+  const profitPercentage = Number(order.profit_percentage) || 0;
+  const quantity = Number(order.quantity) || 1;
+
+  // Calculate total amount with profit and quantity
+  const totalAmount = profitPercentage > 0
+    ? (baseAmount * (1 + profitPercentage/100) * quantity)
+    : (baseAmount * quantity);
+
+  console.log(`Email calculation - Base: ${baseAmount}, Profit: ${profitPercentage}%, Quantity: ${quantity}, Total: ${totalAmount}`);
+
   const paidAmount = Number(order.advance_amount) || 0;
   const remainingBalance = totalAmount - paidAmount;
 
@@ -313,7 +337,7 @@ export const sendCustomOrderPaymentReminder = async (order, customerEmail) => {
         <p><strong>Total Order Amount:</strong> Rs. ${totalAmount.toLocaleString()}</p>
         <p><strong>Amount Paid:</strong> Rs. ${paidAmount.toLocaleString()}</p>
         <p><strong>Remaining Balance:</strong> <span style="color: #e53935; font-weight: bold;">Rs. ${remainingBalance.toLocaleString()}</span></p>
-        <p><strong>Payment Status:</strong> ${order.payment_status}</p>
+        <p><strong>Payment Status:</strong> ${remainingBalance <= 0 ? 'Fully Paid' : paidAmount > 0 ? 'Partially Paid' : 'Unpaid'}</p>
       </div>
 
       <p>To ensure timely completion of your order, please arrange for the payment of the remaining balance at your earliest convenience.</p>
@@ -345,10 +369,81 @@ export const sendCustomOrderPaymentReminder = async (order, customerEmail) => {
   });
 };
 
+/**
+ * Send a payment reminder email for inventory items
+ * @param {Object} payment - Payment details
+ * @param {string} customerEmail - Customer email address
+ * @returns {Promise} - Result of sending the email
+ */
+export const sendInventoryItemPaymentReminder = async (payment, customerEmail) => {
+  const subject = `Payment Reminder for Jewelry Purchase`;
+
+  // Calculate remaining balance
+  const totalAmount = Number(payment.total_amount) || 0;
+  const paidAmount = Number(payment.advance_amount) || 0;
+  const remainingBalance = totalAmount - paidAmount;
+
+  // Format date
+  const paymentDate = new Date(payment.payment_date).toLocaleDateString();
+
+  // Create HTML content for the email
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <h2 style="color: #333; border-bottom: 1px solid #ddd; padding-bottom: 10px;">Payment Reminder</h2>
+
+      <p>Dear ${payment.customer_name},</p>
+
+      <p>This is a friendly reminder about the remaining balance on your jewelry purchase.</p>
+
+      <div style="background-color: #f9f9f9; padding: 15px; border-radius: 5px; margin: 20px 0;">
+        <h3 style="margin-top: 0; color: #333;">Purchase Details</h3>
+        <p><strong>Reference:</strong> ${payment.payment_reference}</p>
+        <p><strong>Date:</strong> ${paymentDate}</p>
+        <p><strong>Item:</strong> ${payment.item_name || 'Jewelry Item'} ${payment.item_quantity ? `(${payment.item_quantity} item(s))` : ''}</p>
+      </div>
+
+      <div style="background-color: #f9f9f9; padding: 15px; border-radius: 5px; margin: 20px 0;">
+        <h3 style="margin-top: 0; color: #333;">Payment Summary</h3>
+        <p><strong>Total Amount:</strong> Rs. ${totalAmount.toLocaleString()}</p>
+        <p><strong>Amount Paid:</strong> Rs. ${paidAmount.toLocaleString()}</p>
+        <p><strong>Remaining Balance:</strong> <span style="color: #e53935; font-weight: bold;">Rs. ${remainingBalance.toLocaleString()}</span></p>
+        <p><strong>Payment Status:</strong> ${remainingBalance <= 0 ? 'Fully Paid' : paidAmount > 0 ? 'Partially Paid' : 'Unpaid'}</p>
+      </div>
+
+      <p>To complete your purchase, please arrange for the payment of the remaining balance at your earliest convenience.</p>
+
+      <p>You can make the payment by visiting our store or by contacting our customer service.</p>
+
+      <div style="margin: 30px 0; text-align: center;">
+        <a href="http://localhost:3000/DashView/advance-payment"
+           style="background-color: #ffc107; color: #000; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: bold;">
+          Make a Payment
+        </a>
+      </div>
+
+      <p>If you have already made the payment, please disregard this reminder.</p>
+
+      <p>Thank you for choosing our jewelry shop!</p>
+
+      <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd; color: #777; font-size: 12px;">
+        <p>This is an automated email. Please do not reply to this message.</p>
+        <p>If you have any questions, please contact our customer service.</p>
+      </div>
+    </div>
+  `;
+
+  return sendEmail({
+    to: customerEmail,
+    subject,
+    html
+  });
+};
+
 export default {
   sendEmail,
   sendOrderConfirmation,
   sendPaymentReceipt,
   sendOrderStatusUpdate,
-  sendCustomOrderPaymentReminder
+  sendCustomOrderPaymentReminder,
+  sendInventoryItemPaymentReminder
 };

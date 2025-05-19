@@ -168,25 +168,89 @@ export const getFinancialReport = async (params = {}) => {
  */
 export const exportReportCSV = async (reportType, params = {}) => {
   try {
-    const response = await axiosInstance.get('/export', {
-      params: { reportType, format: 'csv', ...params },
-      responseType: 'blob'
-    });
+    // Check if we have filtered data for low-stock or valuation report
+    if ((reportType === 'low-stock' && params.useFilteredData && window.filteredLowStockData) ||
+        (reportType === 'valuation' && params.useFilteredData && window.filteredValuationData)) {
+      console.log(`Using filtered ${reportType} data for CSV export`);
 
-    // Create a download link and trigger download
-    const url = window.URL.createObjectURL(new Blob([response.data]));
-    const link = document.createElement('a');
-    link.href = url;
+      // Get the appropriate filtered data
+      const items = reportType === 'low-stock'
+        ? window.filteredLowStockData
+        : window.filteredValuationData;
 
-    // Generate filename
-    const date = new Date().toISOString().split('T')[0];
-    link.setAttribute('download', `${reportType}_report_${date}.csv`);
+      if (!items || items.length === 0) {
+        console.warn('No filtered items to export');
+        throw new Error('No data to export');
+      }
 
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
+      // Get headers from the first item
+      const headers = Object.keys(items[0]);
 
-    return { success: true };
+      // Create CSV content
+      let csvContent = headers.join(',') + '\n';
+
+      // Add data rows
+      items.forEach(item => {
+        const row = headers.map(header => {
+          const value = item[header];
+          // Handle values with commas by wrapping in quotes
+          if (value === null || value === undefined) return '';
+          if (typeof value === 'string' && value.includes(',')) {
+            return `"${value}"`;
+          }
+          return value;
+        }).join(',');
+        csvContent += row + '\n';
+      });
+
+      // Create a download link and trigger download
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+
+      // Generate filename with category if present
+      const date = new Date().toISOString().split('T')[0];
+      let filename;
+
+      if (params.categoryFilter) {
+        if (reportType === 'low-stock') {
+          filename = `low_stock_${params.categoryFilter.toLowerCase()}_report_${date}.csv`;
+        } else if (reportType === 'valuation') {
+          filename = `valuation_${params.categoryFilter.toLowerCase()}_report_${date}.csv`;
+        }
+      } else {
+        filename = `${reportType}_report_${date}.csv`;
+      }
+
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+
+      return { success: true };
+    } else {
+      // Use the API for export
+      const response = await axiosInstance.get('/export', {
+        params: { reportType, format: 'csv', ...params },
+        responseType: 'blob'
+      });
+
+      // Create a download link and trigger download
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+
+      // Generate filename
+      const date = new Date().toISOString().split('T')[0];
+      link.setAttribute('download', `${reportType}_report_${date}.csv`);
+
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+
+      return { success: true };
+    }
   } catch (error) {
     console.error('Error exporting report:', error);
     throw error;
@@ -206,36 +270,56 @@ export const exportReportPDF = async (reportType, params = {}, chartRef = null) 
     let data = [];
     let filename = `${reportType}_report_${new Date().toISOString().split('T')[0]}`;
 
-    // Get data from the API
-    console.log('Fetching report data from API for', reportType);
-    const response = await axiosInstance.get('/export', {
-      params: { reportType, format: 'json', ...params }
-    });
+    // Check if we have filtered data for low-stock or valuation report
+    if ((reportType === 'low-stock' && params.useFilteredData && window.filteredLowStockData) ||
+        (reportType === 'valuation' && params.useFilteredData && window.filteredValuationData)) {
+      console.log(`Using filtered ${reportType} data for PDF export`);
 
-    // Log the response for debugging
-    console.log('API response:', response.data);
+      // Get the appropriate filtered data
+      data = reportType === 'low-stock'
+        ? window.filteredLowStockData
+        : window.filteredValuationData;
 
-    // Check if we have data from the API
-    if (response.data && response.data.data && response.data.data.length > 0) {
-      console.log('Using API data for report');
-      data = response.data.data;
-      filename = response.data.filename || filename;
+      // Add category filter to filename if present
+      if (params.categoryFilter) {
+        if (reportType === 'low-stock') {
+          filename = `low_stock_${params.categoryFilter.toLowerCase()}_report_${new Date().toISOString().split('T')[0]}`;
+        } else if (reportType === 'valuation') {
+          filename = `valuation_${params.categoryFilter.toLowerCase()}_report_${new Date().toISOString().split('T')[0]}`;
+        }
+      }
     } else {
-      console.log('No data from API, checking for chart data');
-      // If no data from API, try to use chart data as fallback
-      if (chartRef && chartRef.current) {
-        try {
-          // Create data from the chart for PDF
-          const chartData = window.chartData || [];
+      // Get data from the API
+      console.log('Fetching report data from API for', reportType);
+      const response = await axiosInstance.get('/export', {
+        params: { reportType, format: 'json', ...params }
+      });
 
-          if (chartData && chartData.length > 0) {
-            console.log('Using chart data for report');
-            data = chartData;
-          } else {
-            console.log('No chart data available');
+      // Log the response for debugging
+      console.log('API response:', response.data);
+
+      // Check if we have data from the API
+      if (response.data && response.data.data && response.data.data.length > 0) {
+        console.log('Using API data for report');
+        data = response.data.data;
+        filename = response.data.filename || filename;
+      } else {
+        console.log('No data from API, checking for chart data');
+        // If no data from API, try to use chart data as fallback
+        if (chartRef && chartRef.current) {
+          try {
+            // Create data from the chart for PDF
+            const chartData = window.chartData || [];
+
+            if (chartData && chartData.length > 0) {
+              console.log('Using chart data for report');
+              data = chartData;
+            } else {
+              console.log('No chart data available');
+            }
+          } catch (chartError) {
+            console.error('Error getting chart data:', chartError);
           }
-        } catch (chartError) {
-          console.error('Error getting chart data:', chartError);
         }
       }
     }
@@ -243,15 +327,28 @@ export const exportReportPDF = async (reportType, params = {}, chartRef = null) 
     // Get user info from server response or fallback to localStorage
     let userName = 'System User';
 
-    // Check if the server provided a user name in the response
-    if (response.data && response.data.generatedBy) {
-      console.log('Using server-provided user name:', response.data.generatedBy);
-      userName = response.data.generatedBy;
+    // Check if we have a response object (we might not if using filtered data)
+    if (typeof response !== 'undefined') {
+      // Check if the server provided a user name in the response
+      if (response.data && response.data.generatedBy) {
+        console.log('Using server-provided user name:', response.data.generatedBy);
+        userName = response.data.generatedBy;
+      } else {
+        // Fallback to localStorage if server didn't provide a name
+        const userInfo = JSON.parse(localStorage.getItem('userInfo')) || { name: 'System User' };
+        console.log('Using localStorage user name:', userInfo.name);
+        userName = userInfo.name;
+      }
     } else {
-      // Fallback to localStorage if server didn't provide a name
-      const userInfo = JSON.parse(localStorage.getItem('userInfo')) || { name: 'System User' };
-      console.log('Using localStorage user name:', userInfo.name);
-      userName = userInfo.name;
+      // If no response object (using filtered data), get user info from localStorage
+      try {
+        const userInfo = JSON.parse(localStorage.getItem('userInfo')) || { name: 'System User' };
+        console.log('Using localStorage user name:', userInfo.name);
+        userName = userInfo.name;
+      } catch (error) {
+        console.error('Error getting user info from localStorage:', error);
+        userName = 'System User';
+      }
     }
 
     // Import jsPDF and autoTable dynamically
@@ -283,11 +380,17 @@ export const exportReportPDF = async (reportType, params = {}, chartRef = null) 
         titleColor = [184, 134, 11]; // Gold
         break;
       case 'low-stock':
-        title = 'Low Stock Report';
+        // Add category to title if filtering by category
+        title = params.categoryFilter
+          ? `Low Stock Report - ${params.categoryFilter}`
+          : 'Low Stock Report';
         titleColor = [255, 0, 0]; // Red
         break;
       case 'valuation':
-        title = 'Inventory Valuation Report';
+        // Add category to title if filtering by category
+        title = params.categoryFilter
+          ? `Inventory Valuation Report - ${params.categoryFilter}`
+          : 'Inventory Valuation Report';
         titleColor = [0, 0, 128]; // Navy
         break;
       case 'sales-daily':

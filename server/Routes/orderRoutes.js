@@ -187,7 +187,63 @@ router.get("/", (req, res) => {
         return order;
       });
 
-      res.json(processedResults);
+      // Check if order_items table exists
+      con.query("SHOW TABLES LIKE 'order_items'", (itemsTableErr, itemsTableResults) => {
+        if (itemsTableErr) {
+          console.error("Error checking for order_items table:", itemsTableErr);
+          return res.json(processedResults); // Return orders without items
+        }
+
+        const orderItemsTableExists = itemsTableResults.length > 0;
+
+        if (orderItemsTableExists && processedResults.length > 0) {
+          // Get all order IDs
+          const orderIds = processedResults.map(order => order.order_id);
+
+          // Get order items for all orders
+          // Create placeholders for IN clause
+          const placeholders = orderIds.map(() => '?').join(',');
+          const itemsSql = `SELECT * FROM order_items WHERE order_id IN (${placeholders})`;
+          con.query(itemsSql, orderIds, (itemsErr, itemsResults) => {
+            if (itemsErr) {
+              console.error("Error fetching order items:", itemsErr);
+              return res.json(processedResults); // Return orders without items
+            }
+
+            // Process image URLs for items
+            const processedItems = (itemsResults || []).map(item => {
+              if (item.design_image) {
+                const baseUrl = `${req.protocol}://${req.get('host')}`;
+                const imagePath = item.design_image.startsWith('uploads/')
+                  ? item.design_image
+                  : `uploads/${item.design_image}`;
+                item.design_image_url = `${baseUrl}/${imagePath}`;
+              }
+              return item;
+            });
+
+            // Group items by order_id
+            const itemsByOrderId = {};
+            processedItems.forEach(item => {
+              if (!itemsByOrderId[item.order_id]) {
+                itemsByOrderId[item.order_id] = [];
+              }
+              itemsByOrderId[item.order_id].push(item);
+            });
+
+            // Add items to each order
+            processedResults.forEach(order => {
+              order.items = itemsByOrderId[order.order_id] || [];
+              order.itemsCount = order.items.length;
+            });
+
+            res.json(processedResults);
+          });
+        } else {
+          // Order_items table doesn't exist or no orders, return orders without items
+          res.json(processedResults);
+        }
+      });
     });
   });
 });
@@ -297,7 +353,56 @@ router.get("/:id", (req, res) => {
         console.log(`Image URL: ${order.design_image_url}`);
       }
 
-      res.json(order);
+      // Check if order_items table exists
+      con.query("SHOW TABLES LIKE 'order_items'", (itemsTableErr, itemsTableResults) => {
+        if (itemsTableErr) {
+          console.error("Error checking for order_items table:", itemsTableErr);
+          return res.json(order); // Return order without items
+        }
+
+        const orderItemsTableExists = itemsTableResults.length > 0;
+
+        if (orderItemsTableExists) {
+          // Get order items
+          const itemsSql = "SELECT * FROM order_items WHERE order_id = ?";
+          console.log(`Fetching items for order ${orderId} with SQL: ${itemsSql}`);
+
+          con.query(itemsSql, [orderId], (itemsErr, itemsResults) => {
+            if (itemsErr) {
+              console.error("Error fetching order items:", itemsErr);
+              return res.json(order); // Return order without items
+            }
+
+            console.log(`Found ${itemsResults ? itemsResults.length : 0} items for order ${orderId}`);
+            if (itemsResults && itemsResults.length > 0) {
+              console.log(`Sample item:`, itemsResults[0]);
+            } else {
+              console.log(`No items found for order ${orderId}`);
+            }
+
+            // Process image URLs for items
+            const processedItems = (itemsResults || []).map(item => {
+              if (item.design_image) {
+                const baseUrl = `${req.protocol}://${req.get('host')}`;
+                const imagePath = item.design_image.startsWith('uploads/')
+                  ? item.design_image
+                  : `uploads/${item.design_image}`;
+                item.design_image_url = `${baseUrl}/${imagePath}`;
+              }
+              return item;
+            });
+
+            // Add items to order
+            order.items = processedItems;
+            order.itemsCount = processedItems.length;
+
+            res.json(order);
+          });
+        } else {
+          // Order_items table doesn't exist, return order without items
+          res.json(order);
+        }
+      });
     });
   });
 });
@@ -312,15 +417,34 @@ router.post("/create", (req, res) => {
     selectedKarats,
     karatValues,
     image,
-    branch_id // Add branch_id to the request body
+    branch_id, // Add branch_id to the request body
+    items, // Array of items for the order
+    existing_order_id // ID of an existing order to add items to
   } = req.body;
 
-  console.log('POST /orders/create - Creating new order');
+  console.log('POST /orders/create - Creating new order or adding to existing order');
   console.log(`Order details - Category: ${category}, Supplier: ${supplier}, Branch ID: ${branch_id}`);
+  console.log(`Existing Order ID: ${existing_order_id || 'None'}`);
 
-  // Basic validation
-  if (!category || !supplier || !quantity) {
+  // Check if we have items array
+  const hasItems = items && Array.isArray(items) && items.length > 0;
+  console.log(`Order has ${hasItems ? items.length : 0} items`);
+
+  // Basic validation - if no items array, require category, supplier, quantity
+  if (!hasItems && (!category || !supplier || !quantity)) {
     return res.status(400).json({ message: "Missing required fields" });
+  }
+
+  // If we have items, validate that each item has the required fields
+  if (hasItems) {
+    for (const item of items) {
+      if (!item.category) {
+        return res.status(400).json({ message: "Missing category for an item" });
+      }
+      if (!item.quantity) {
+        return res.status(400).json({ message: "Missing quantity for an item" });
+      }
+    }
   }
 
   // Convert arrays and objects to JSON strings for storage
@@ -596,7 +720,7 @@ router.post("/create", (req, res) => {
             goldPurity,
             offeredGoldValue
           ];
-      }
+        }
       } else {
         // Use the original queries without price fields
         if (branchColumnExists && branch_id) {
@@ -700,38 +824,270 @@ router.post("/create", (req, res) => {
             }
           }
 
-          // If we get here, there's enough gold stock, so create the order
-          // Check if goldPurity is a valid number between 0 and 1
-          if (goldPurity !== null && (isNaN(goldPurity) || goldPurity < 0 || goldPurity > 1)) {
-            // Fix goldPurity to be a valid value
-            if (selectedKarat === '24K') {
-              values[values.length - 1] = 0.999; // 24K is 99.9% pure
-            } else if (selectedKarat === '22K') {
-              values[values.length - 1] = 0.916; // 22K is 91.6% pure
-            } else if (selectedKarat === '21K') {
-              values[values.length - 1] = 0.875; // 21K is 87.5% pure
-            } else if (selectedKarat === '18K') {
-              values[values.length - 1] = 0.750; // 18K is 75.0% pure
-            } else if (selectedKarat === '16K') {
-              values[values.length - 1] = 0.667; // 16K is 66.7% pure
-            } else {
-              values[values.length - 1] = 0.5; // Default to 50% if unknown
+          let orderId;
+
+          // Check if we're adding to an existing order
+          if (existing_order_id) {
+            // Verify the existing order exists
+            const checkOrderSql = `SELECT order_id, supplier_id, quantity, total_amount FROM orders WHERE order_id = ?`;
+            const checkOrderResult = await new Promise((resolve, reject) => {
+              con.query(checkOrderSql, [existing_order_id], (err, result) => {
+                if (err) {
+                  reject(err);
+                } else {
+                  resolve(result);
+                }
+              });
+            });
+
+            if (checkOrderResult.length === 0) {
+              throw new Error(`Order with ID ${existing_order_id} not found`);
             }
-            console.log(`Fixed goldPurity to ${values[values.length - 1]}`);
+
+            // Verify the supplier matches
+            if (checkOrderResult[0].supplier_id.toString() !== supplier.toString()) {
+              throw new Error(`Supplier mismatch: Cannot add items from different suppliers to the same order`);
+            }
+
+            // Use the existing order ID
+            orderId = existing_order_id;
+            console.log(`Adding items to existing order ID: ${orderId}`);
+
+            // Update the orders table with new totals
+            // Calculate new quantity and total amount
+            const existingQuantity = parseInt(checkOrderResult[0].quantity) || 0;
+            const existingTotalAmount = parseFloat(checkOrderResult[0].total_amount) || 0;
+            const newQuantity = existingQuantity + parseInt(quantity);
+            const newTotalAmount = existingTotalAmount + parseFloat(totalAmount || 0);
+
+            // Update the orders table
+            const updateOrderSql = `
+              UPDATE orders
+              SET
+                quantity = ?,
+                total_amount = ?,
+                updated_at = NOW()
+              WHERE order_id = ?
+            `;
+
+            await new Promise((resolve, reject) => {
+              con.query(updateOrderSql, [newQuantity, newTotalAmount, orderId], (err, result) => {
+                if (err) {
+                  reject(err);
+                } else {
+                  console.log(`Updated order ${orderId} with new totals: quantity=${newQuantity}, total_amount=${newTotalAmount}`);
+                  resolve(result);
+                }
+              });
+            });
+          } else {
+            // If we get here, there's enough gold stock, so create the order
+            // Check if goldPurity is a valid number between 0 and 1
+            if (goldPurity !== null && (isNaN(goldPurity) || goldPurity < 0 || goldPurity > 1)) {
+              // Fix goldPurity to be a valid value
+              if (selectedKarat === '24K') {
+                values[values.length - 1] = 0.999; // 24K is 99.9% pure
+              } else if (selectedKarat === '22K') {
+                values[values.length - 1] = 0.916; // 22K is 91.6% pure
+              } else if (selectedKarat === '21K') {
+                values[values.length - 1] = 0.875; // 21K is 87.5% pure
+              } else if (selectedKarat === '18K') {
+                values[values.length - 1] = 0.750; // 18K is 75.0% pure
+              } else if (selectedKarat === '16K') {
+                values[values.length - 1] = 0.667; // 16K is 66.7% pure
+              } else {
+                values[values.length - 1] = 0.5; // Default to 50% if unknown
+              }
+              console.log(`Fixed goldPurity to ${values[values.length - 1]}`);
+            }
+
+            const orderResult = await new Promise((resolve, reject) => {
+              con.query(sql, values, (err, result) => {
+                if (err) {
+                  reject(err);
+                } else {
+                  resolve(result);
+                }
+              });
+            });
+
+            orderId = orderResult.insertId;
+            console.log(`Order created with ID: ${orderId}`);
           }
 
-          const orderResult = await new Promise((resolve, reject) => {
-            con.query(sql, values, (err, result) => {
-              if (err) {
-                reject(err);
-              } else {
-                resolve(result);
-              }
-            });
-          });
+          // If we have items, insert them into order_items table
+          if (hasItems) {
+            console.log(`Inserting ${items.length} items for order ID: ${orderId}`);
 
-          const orderId = orderResult.insertId;
-          console.log(`Order created with ID: ${orderId}`);
+            // Check if order_items table exists
+            const orderItemsTableExists = await new Promise((resolve) => {
+              con.query("SHOW TABLES LIKE 'order_items'", (tableErr, tableResults) => {
+                if (tableErr) {
+                  console.error("Error checking for order_items table:", tableErr);
+                  resolve(false);
+                } else {
+                  resolve(tableResults.length > 0);
+                }
+              });
+            });
+
+            if (!orderItemsTableExists) {
+              // Create the order_items table
+              const createTableSql = `
+                CREATE TABLE IF NOT EXISTS order_items (
+                  order_item_id INT AUTO_INCREMENT PRIMARY KEY,
+                  order_id INT NOT NULL,
+                  category VARCHAR(100) NOT NULL,
+                  quantity INT NOT NULL,
+                  offer_gold TINYINT(1) DEFAULT 0,
+                  selected_karats JSON,
+                  karat_values JSON,
+                  design_image LONGTEXT,
+                  status VARCHAR(50) DEFAULT 'pending',
+                  gold_price_per_gram DECIMAL(10,2) DEFAULT NULL,
+                  weight_in_grams DECIMAL(10,2) DEFAULT NULL,
+                  making_charges DECIMAL(10,2) DEFAULT NULL,
+                  additional_materials_charges DECIMAL(10,2) DEFAULT NULL,
+                  base_estimated_price DECIMAL(10,2) DEFAULT NULL,
+                  estimated_price DECIMAL(10,2) DEFAULT NULL,
+                  total_amount DECIMAL(10,2) DEFAULT NULL,
+                  selectedKarat VARCHAR(10) DEFAULT NULL,
+                  goldPurity DECIMAL(5,4) DEFAULT NULL,
+                  offered_gold_value DECIMAL(10,2) DEFAULT 0,
+                  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME ON UPDATE CURRENT_TIMESTAMP,
+                  FOREIGN KEY (order_id) REFERENCES orders(order_id) ON DELETE CASCADE
+                )
+              `;
+
+              await new Promise((resolve) => {
+                con.query(createTableSql, (createErr) => {
+                  if (createErr) {
+                    console.error("Error creating order_items table:", createErr);
+                    resolve(false);
+                  } else {
+                    console.log("order_items table created successfully");
+                    resolve(true);
+                  }
+                });
+              });
+            }
+
+            // Insert items into order_items table
+            for (const item of items) {
+              // Process JSON data for the item
+              let itemKaratsJson, itemKaratValuesJson;
+
+              try {
+                // Process selectedKarats
+                if (typeof item.selectedKarats === 'string') {
+                  JSON.parse(item.selectedKarats); // Validate JSON
+                  itemKaratsJson = item.selectedKarats;
+                } else {
+                  itemKaratsJson = JSON.stringify(item.selectedKarats || {});
+                }
+
+                // Process karatValues
+                if (typeof item.karatValues === 'string') {
+                  JSON.parse(item.karatValues); // Validate JSON
+                  itemKaratValuesJson = item.karatValues;
+                } else {
+                  itemKaratValuesJson = JSON.stringify(item.karatValues || {});
+                }
+              } catch (jsonError) {
+                console.error('Error processing JSON data for item:', jsonError);
+                // Use empty objects as fallback
+                itemKaratsJson = '{}';
+                itemKaratValuesJson = '{}';
+              }
+
+              // Insert the item
+              const itemSql = `
+                INSERT INTO order_items (
+                  order_id,
+                  category,
+                  quantity,
+                  offer_gold,
+                  selected_karats,
+                  karat_values,
+                  design_image,
+                  status,
+                  gold_price_per_gram,
+                  weight_in_grams,
+                  making_charges,
+                  additional_materials_charges,
+                  base_estimated_price,
+                  estimated_price,
+                  total_amount,
+                  selectedKarat,
+                  goldPurity,
+                  offered_gold_value
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              `;
+
+              await new Promise((resolve) => {
+                con.query(itemSql, [
+                  orderId,
+                  item.category || category,
+                  item.quantity || quantity,
+                  item.offerGold === 'yes' ? 1 : (offerGold === 'yes' ? 1 : 0),
+                  itemKaratsJson,
+                  itemKaratValuesJson,
+                  null, // Initially set design_image to null, will be updated later
+                  'pending',
+                  item.goldPricePerGram || null,
+                  item.weightInGrams || null,
+                  item.makingCharges || null,
+                  item.additionalMaterialsCharges || null,
+                  item.baseEstimatedPrice || null,
+                  item.estimatedPrice || null,
+                  item.totalAmount || null,
+                  item.selectedKarat || null,
+                  item.goldPurity || null,
+                  item.offeredGoldValue || 0
+                ], (itemErr, itemResult) => {
+                  if (itemErr) {
+                    console.error("Error inserting order item:", itemErr);
+                    resolve(false);
+                  } else {
+                    const itemId = itemResult.insertId;
+                    console.log(`Order item inserted with ID: ${itemId}`);
+
+                    // Check if this item has its own image
+                    if (item.image) {
+                      try {
+                        // Generate a unique filename for this item
+                        const itemImagePath = saveBase64Image(item.image, `${orderId}_item_${itemId}`);
+
+                        if (itemImagePath) {
+                          // Update just this item with its image path
+                          const updateItemImageSql = "UPDATE order_items SET design_image = ? WHERE order_item_id = ?";
+                          con.query(updateItemImageSql, [itemImagePath, itemId], (updateItemErr) => {
+                            if (updateItemErr) {
+                              console.error(`Error updating item ${itemId} with image:`, updateItemErr);
+                            } else {
+                              console.log(`Updated item ${itemId} with image: ${itemImagePath}`);
+                            }
+                            resolve(true);
+                          });
+                        } else {
+                          console.error(`Failed to save image for item ${itemId}`);
+                          resolve(true);
+                        }
+                      } catch (itemImageError) {
+                        console.error(`Error saving image for item ${itemId}:`, itemImageError);
+                        resolve(true);
+                      }
+                    } else {
+                      resolve(true);
+                    }
+                  }
+                });
+              });
+            }
+
+            console.log(`All ${items.length} items inserted successfully for order ID: ${orderId}`);
+          }
 
           // Commit the transaction
           con.commit((commitErr) => {
@@ -1007,188 +1363,86 @@ router.post("/create", (req, res) => {
           }
         }
 
-        // If there's an image, save it and update the order
-        if (image) {
-          try {
-            const imagePath = saveBase64Image(image, orderId);
+        // We no longer handle images at the order level
+        // Each item has its own image that was already saved during item creation
 
-            if (imagePath) {
-              // Update the order with the image path
-              const updateSql = "UPDATE orders SET design_image = ? WHERE order_id = ?";
-              con.query(updateSql, [imagePath, orderId], (updateErr) => {
-                if (updateErr) {
-                  console.error("Error updating order with image:", updateErr);
-                  // Still return success, just log the error
-                }
+        // Create a notification for the inventory order
+        try {
+          console.log('Attempting to create inventory order notification...');
 
-                // Create a notification for the inventory order
-                try {
-                  console.log('Attempting to create inventory order notification...');
-
-                  // Get the supplier name
-                  con.query("SELECT name FROM suppliers WHERE supplier_id = ?", [supplier], (supplierErr, supplierResults) => {
-                    if (supplierErr) {
-                      console.error("Error fetching supplier name:", supplierErr);
-                    } else {
-                      const supplierName = supplierResults.length > 0 ? supplierResults[0].name : 'Unknown Supplier';
-
-                      console.log('Inventory order notification data:', {
-                        order_id: orderId,
-                        supplier_name: supplierName,
-                        category: category,
-                        branch_id: branch_id
-                      });
-
-                      // Make a direct database insert instead of using fetch
-                      // Calculate expiration date (5 days from now)
-                      const expiresAt = new Date();
-                      expiresAt.setDate(expiresAt.getDate() + 5);
-
-                      // Create notification for Admin and Store Manager
-                      const title = 'New Inventory Order';
-                      const categoryInfo = category ? ` for ${category}` : '';
-                      const message = `A new inventory order${categoryInfo} has been placed with ${supplierName}`;
-                      // Include all possible role formats to ensure compatibility
-                      const targetRoles = JSON.stringify(["admin", "Admin", "store manager", "Store Manager", "storemanager"]);
-
-                      const notificationSql = `
-                        INSERT INTO notifications (
-                          title,
-                          message,
-                          type,
-                          target_roles,
-                          expires_at,
-                          branch_id,
-                          related_id,
-                          related_type
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                      `;
-
-                      const notificationParams = [
-                        title,
-                        message,
-                        'inventory_order',
-                        targetRoles,
-                        expiresAt,
-                        branch_id,
-                        orderId,
-                        'order'
-                      ];
-
-                      con.query(notificationSql, notificationParams, (notificationErr, notificationResult) => {
-                        if (notificationErr) {
-                          console.error('Error creating inventory order notification in database:', notificationErr);
-                        } else {
-                          console.log(`Inventory order notification created with ID: ${notificationResult.insertId}`);
-                        }
-                      });
-                    }
-                  });
-                } catch (notificationError) {
-                  console.error('Error creating inventory order notification:', notificationError);
-                  // Continue anyway, notification failure shouldn't stop the order response
-                }
-
-                res.status(201).json({
-                  success: true,
-                  message: "Order created successfully with image",
-                  orderId: orderId,
-                  imagePath: imagePath
-                });
-              });
+          // Get the supplier name
+          con.query("SELECT name FROM suppliers WHERE supplier_id = ?", [supplier], (supplierErr, supplierResults) => {
+            if (supplierErr) {
+              console.error("Error fetching supplier name:", supplierErr);
             } else {
-              // Create a notification for the inventory order
-              try {
-                console.log('Attempting to create inventory order notification (no image)...');
+              const supplierName = supplierResults.length > 0 ? supplierResults[0].name : 'Unknown Supplier';
 
-                // Get the supplier name
-                con.query("SELECT name FROM suppliers WHERE supplier_id = ?", [supplier], (supplierErr, supplierResults) => {
-                  if (supplierErr) {
-                    console.error("Error fetching supplier name:", supplierErr);
-                  } else {
-                    const supplierName = supplierResults.length > 0 ? supplierResults[0].name : 'Unknown Supplier';
+              console.log('Inventory order notification data:', {
+                order_id: orderId,
+                supplier_name: supplierName,
+                category: category,
+                branch_id: branch_id
+              });
 
-                    console.log('Inventory order notification data (no image):', {
-                      order_id: orderId,
-                      supplier_name: supplierName,
-                      category: category,
-                      branch_id: branch_id
-                    });
+              // Make a direct database insert instead of using fetch
+              // Calculate expiration date (5 days from now)
+              const expiresAt = new Date();
+              expiresAt.setDate(expiresAt.getDate() + 5);
 
-                    // Make a direct database insert instead of using fetch
-                    // Calculate expiration date (5 days from now)
-                    const expiresAt = new Date();
-                    expiresAt.setDate(expiresAt.getDate() + 5);
+              // Create notification for Admin and Store Manager
+              const title = 'New Inventory Order';
+              const categoryInfo = category ? ` for ${category}` : '';
+              const message = `A new inventory order${categoryInfo} has been placed with ${supplierName}`;
+              // Include all possible role formats to ensure compatibility
+              const targetRoles = JSON.stringify(["admin", "Admin", "store manager", "Store Manager", "storemanager"]);
 
-                    // Create notification for Admin and Store Manager
-                    const title = 'New Inventory Order';
-                    const categoryInfo = category ? ` for ${category}` : '';
-                    const message = `A new inventory order${categoryInfo} has been placed with ${supplierName}`;
-                    // Include all possible role formats to ensure compatibility
-                    const targetRoles = JSON.stringify(["admin", "Admin", "store manager", "Store Manager", "storemanager"]);
+              const notificationSql = `
+                INSERT INTO notifications (
+                  title,
+                  message,
+                  type,
+                  target_roles,
+                  expires_at,
+                  branch_id,
+                  related_id,
+                  related_type
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+              `;
 
-                    const notificationSql = `
-                      INSERT INTO notifications (
-                        title,
-                        message,
-                        type,
-                        target_roles,
-                        expires_at,
-                        branch_id,
-                        related_id,
-                        related_type
-                      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    `;
+              const notificationParams = [
+                title,
+                message,
+                'inventory_order',
+                targetRoles,
+                expiresAt,
+                branch_id,
+                orderId,
+                'order'
+              ];
 
-                    const notificationParams = [
-                      title,
-                      message,
-                      'inventory_order',
-                      targetRoles,
-                      expiresAt,
-                      branch_id,
-                      orderId,
-                      'order'
-                    ];
-
-                    con.query(notificationSql, notificationParams, (notificationErr, notificationResult) => {
-                      if (notificationErr) {
-                        console.error('Error creating inventory order notification in database:', notificationErr);
-                      } else {
-                        console.log(`Inventory order notification created with ID: ${notificationResult.insertId}`);
-                      }
-                    });
-                  }
-                });
-              } catch (notificationError) {
-                console.error('Error creating inventory order notification:', notificationError);
-                // Continue anyway, notification failure shouldn't stop the order response
-              }
-
-              // Return success even if image saving failed
-              res.status(201).json({
-                success: true,
-                message: "Order created successfully, but image could not be saved",
-                orderId: orderId
+              con.query(notificationSql, notificationParams, (notificationErr, notificationResult) => {
+                if (notificationErr) {
+                  console.error('Error creating inventory order notification in database:', notificationErr);
+                } else {
+                  console.log(`Inventory order notification created with ID: ${notificationResult.insertId}`);
+                }
               });
             }
-          } catch (imageErr) {
-            console.error("Error saving image:", imageErr);
-            res.status(201).json({
-              success: true,
-              message: "Order created successfully, but image could not be saved",
-              orderId: orderId,
-              imageError: imageErr.message
-            });
-          }
-        } else {
-          // No image to save
-          res.status(201).json({
-            success: true,
-            message: "Order created successfully",
-            orderId: orderId
           });
+        } catch (notificationError) {
+          console.error('Error creating inventory order notification:', notificationError);
+          // Continue anyway, notification failure shouldn't stop the order response
         }
+
+        res.status(201).json({
+          success: true,
+          message: existing_order_id ?
+            (hasItems ? `Item added to existing order successfully` : `Item added to existing order successfully`) :
+            (hasItems ? `Order created successfully with ${items.length} items` : `Order created successfully`),
+          orderId: orderId,
+          isNewOrder: !existing_order_id,
+          itemsCount: hasItems ? items.length : 0
+        });
       });
     } catch (error) {
       console.error("Error in order creation transaction:", error);
@@ -1497,7 +1751,8 @@ router.get("/supplier-liabilities", (req, res) => {
       });
   });
 });
-}); // Close the missing brace from line 335
-}); // Close another missing brace
+
+  }); // Close the missing brace from line 475
+});
 
 export { router as orderRouter };

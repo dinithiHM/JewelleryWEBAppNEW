@@ -24,7 +24,10 @@ try {
   }
 }
 
-const { sendCustomOrderPaymentReminder } = emailService;
+const {
+  sendCustomOrderPaymentReminder,
+  sendOrderStatusUpdate
+} = emailService;
 
 const router = express.Router();
 
@@ -121,7 +124,14 @@ router.get("/:id", (req, res) => {
         COALESCE((SELECT SUM(advance_amount) FROM advance_payments WHERE order_id = co.order_id AND is_custom_order = 1), 0)
       ) as actual_advance_amount,
       (
-        co.estimated_amount -
+        CASE
+          WHEN co.profit_percentage IS NULL OR co.profit_percentage = 0 THEN
+            CASE
+              WHEN co.quantity IS NULL OR co.quantity = 0 THEN co.estimated_amount
+              ELSE co.estimated_amount * co.quantity
+            END
+          ELSE (co.estimated_amount + (co.estimated_amount * (co.profit_percentage / 100))) * COALESCE(co.quantity, 1)
+        END -
         (
           COALESCE((SELECT SUM(payment_amount) FROM custom_order_payments WHERE order_id = co.order_id), 0) +
           COALESCE((SELECT SUM(advance_amount) FROM advance_payments WHERE order_id = co.order_id AND is_custom_order = 1), 0)
@@ -202,20 +212,85 @@ router.get("/:id", (req, res) => {
             imageDetails: processedImages || []
           };
 
-          // Calculate the correct advance amount and balance
-          const totalAdvance = orderData.actual_advance_amount || 0;
-          const estimatedAmount = orderData.estimated_amount || 0;
-          const correctBalance = estimatedAmount - totalAdvance;
+          // Get all payments from both tables
+          const getPaymentsSql = `
+            SELECT
+              COALESCE(SUM(payment_amount), 0) as total_payments
+            FROM
+              custom_order_payments
+            WHERE
+              order_id = ?
+          `;
 
-          // Update the values
-          orderData.advance_amount = totalAdvance;
-          orderData.balance_amount = correctBalance;
+          const getAdvancePaymentsSql = `
+            SELECT
+              COALESCE(SUM(advance_amount), 0) as total_advance_payments
+            FROM
+              advance_payments
+            WHERE
+              order_id = ? AND is_custom_order = 1
+          `;
 
-          console.log(`Calculated values: Total: ${estimatedAmount}, Advance: ${totalAdvance}, Balance: ${correctBalance}`);
+          // Execute both queries to get the total payments
+          con.query(getPaymentsSql, [orderId], (paymentErr, paymentResults) => {
+            if (paymentErr) {
+              console.error("Error fetching payment totals:", paymentErr);
+              // Continue with the data we have
+            }
 
-          console.log(`Order ${orderId} - Advance amount: ${orderData.advance_amount}, Balance: ${orderData.balance_amount}`);
+            con.query(getAdvancePaymentsSql, [orderId], (advanceErr, advanceResults) => {
+              if (advanceErr) {
+                console.error("Error fetching advance payment totals:", advanceErr);
+                // Continue with the data we have
+              }
 
-          res.json(orderData);
+              // Calculate the total payments from both tables
+              const paymentsTotal = paymentErr ? 0 : (paymentResults[0]?.total_payments || 0);
+              const advanceTotal = advanceErr ? 0 : (advanceResults[0]?.total_advance_payments || 0);
+              const totalPayments = paymentsTotal + advanceTotal;
+
+              console.log(`Total payments from custom_order_payments: ${paymentsTotal}`);
+              console.log(`Total payments from advance_payments: ${advanceTotal}`);
+              console.log(`Combined total payments: ${totalPayments}`);
+
+              // Calculate other values
+              const estimatedAmount = orderData.estimated_amount || 0;
+              const profitPercentage = orderData.profit_percentage || 0;
+              const quantity = orderData.quantity || 1;
+
+              // Calculate total amount with profit and quantity
+              let totalAmountWithProfit;
+              if (profitPercentage > 0) {
+                // Calculate profit amount
+                const profitAmount = estimatedAmount * (profitPercentage / 100);
+                // Calculate total amount with profit for a single unit
+                const amountWithProfit = estimatedAmount + profitAmount;
+                // Multiply by quantity to get the final total
+                totalAmountWithProfit = amountWithProfit * quantity;
+              } else {
+                // Even if there's no profit, we still need to account for quantity
+                totalAmountWithProfit = estimatedAmount * quantity;
+              }
+
+              console.log(`Calculated total amount with profit: ${totalAmountWithProfit} (Estimated: ${estimatedAmount}, Profit: ${profitPercentage}%, Quantity: ${quantity})`);
+              console.log(`Price calculation: ${profitPercentage > 0 ?
+                `[(${estimatedAmount} * ${profitPercentage}/100) + ${estimatedAmount}] * ${quantity}` :
+                `${estimatedAmount} * ${quantity}`}`);
+
+              // Calculate the correct balance
+              const correctBalance = totalAmountWithProfit - totalPayments;
+              console.log(`Correct balance calculation: ${totalAmountWithProfit} - ${totalPayments} = ${correctBalance}`);
+
+              // Update the values
+              orderData.advance_amount = totalPayments;
+              orderData.balance_amount = correctBalance;
+              orderData.total_amount_with_profit = totalAmountWithProfit;
+
+              console.log(`Order ${orderId} - Total payments: ${totalPayments}, Balance: ${correctBalance}`);
+
+              res.json(orderData);
+            });
+          });
         });
       });
     });
@@ -254,6 +329,7 @@ router.post("/create", (req, res) => {
     customer_phone,
     customer_email,
     estimated_amount,
+    profit_percentage,
     advance_amount,
     estimated_completion_date,
     category_id,
@@ -267,6 +343,7 @@ router.post("/create", (req, res) => {
   console.log('Extracted form data:');
   console.log('- customer_name:', customer_name);
   console.log('- estimated_amount:', estimated_amount);
+  console.log('- profit_percentage:', profit_percentage);
   console.log('- advance_amount:', advance_amount);
   console.log('- category_id:', category_id, typeof category_id);
   console.log('- supplier_id:', supplier_id, typeof supplier_id);
@@ -324,6 +401,7 @@ router.post("/create", (req, res) => {
           customer_email,
           estimated_completion_date,
           estimated_amount,
+          profit_percentage,
           advance_amount,
           order_status,
           payment_status,
@@ -333,7 +411,7 @@ router.post("/create", (req, res) => {
           special_requirements,
           created_by,
           branch_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
 
       // Convert numeric fields to their proper types
@@ -375,6 +453,15 @@ router.post("/create", (req, res) => {
       const parsedCreatedBy = created_by ? parseInt(created_by, 10) : null;
       const parsedBranchId = branch_id ? parseInt(branch_id, 10) : null;
 
+      // Ensure profit percentage is within limits (max 15%)
+      // Use the exact value provided, or null if not provided (to use database default)
+      let parsedProfitPercentage = null;
+      if (profit_percentage !== undefined && profit_percentage !== '') {
+        parsedProfitPercentage = Math.min(parseFloat(profit_percentage), 15);
+      }
+
+      console.log('Profit percentage:', profit_percentage, 'Parsed profit percentage:', parsedProfitPercentage);
+
       const insertParams = [
         order_reference,
         customer_name,
@@ -382,6 +469,7 @@ router.post("/create", (req, res) => {
         customer_email || null,
         estimated_completion_date || null,
         parseFloat(estimated_amount),
+        parsedProfitPercentage,
         parseFloat(advance_amount) || 0,
         'Pending',
         payment_status,
@@ -494,32 +582,57 @@ router.post("/create", (req, res) => {
 // Update custom order status
 router.put("/:id/status", (req, res) => {
   const orderId = req.params.id;
-  const { order_status } = req.body;
+  const { order_status, supplier_notes } = req.body;
+
+  console.log(`PUT /custom-orders/${orderId}/status - Updating custom order status`);
+  console.log('Request body:', req.body);
 
   if (!order_status) {
+    console.log('Missing order_status in request body');
     return res.status(400).json({ message: "Missing order status" });
   }
 
-  const sql = `
-    UPDATE custom_orders
-    SET order_status = ?
-    WHERE order_id = ?
-  `;
+  // SQL query with optional supplier_notes
+  const sql = supplier_notes
+    ? `
+      UPDATE custom_orders
+      SET order_status = ?, supplier_notes = ?
+      WHERE order_id = ?
+    `
+    : `
+      UPDATE custom_orders
+      SET order_status = ?
+      WHERE order_id = ?
+    `;
 
-  con.query(sql, [order_status, orderId], (err, result) => {
+  // Parameters array based on whether supplier_notes is provided
+  const params = supplier_notes
+    ? [order_status, supplier_notes, orderId]
+    : [order_status, orderId];
+
+  console.log('Executing SQL query:', sql);
+  console.log('With parameters:', params);
+
+  con.query(sql, params, (err, result) => {
     if (err) {
       console.error("Error updating order status:", err);
       return res.status(500).json({ message: "Database error", error: err.message });
     }
 
+    console.log('Query result:', result);
+
     if (result.affectedRows === 0) {
+      console.log(`No order found with ID ${orderId}`);
       return res.status(404).json({ message: "Custom order not found" });
     }
+
+    console.log(`Successfully updated order ${orderId} status to ${order_status}`);
 
     res.json({
       message: "Order status updated successfully",
       order_id: orderId,
-      order_status
+      order_status,
+      supplier_notes: supplier_notes || null
     });
   });
 });
@@ -682,86 +795,108 @@ router.post("/:id/payments", (req, res) => {
 
               // Calculate the correct total payments including the new payment
               const totalPayments = parseFloat(totalResults[0].total_payments || 0);
-              const balance_amount = parseFloat(order.estimated_amount) - totalPayments;
-              const payment_status = balance_amount <= 0 ? 'Fully Paid' : 'Partially Paid';
 
-              // Insert into advance_payments table
-              const advancePaymentSql = `
-                INSERT INTO advance_payments (
-                  payment_reference,
-                  customer_name,
-                  payment_date,
-                  total_amount,
-                  advance_amount,
-                  balance_amount,
-                  payment_status,
-                  payment_method,
-                  notes,
-                  created_by,
-                  branch_id,
-                  is_custom_order,
-                  order_id
-                ) VALUES (?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-              `;
+              // Get profit percentage to calculate total amount with profit
+              const getProfitSql = `SELECT profit_percentage FROM custom_orders WHERE order_id = ?`;
 
-              con.query(advancePaymentSql, [
-                payment_reference,
-                order.customer_name,
-                parseFloat(order.estimated_amount),
-                parseFloat(payment_amount),
-                balance_amount,
-                payment_status,
-                payment_method || 'Cash',
-                notes || 'Additional payment for custom order',
-                order.created_by,
-                order.branch_id,
-                1, // is_custom_order = true
-                orderId
-              ], (advPayErr) => {
-                if (advPayErr) {
+              con.query(getProfitSql, [orderId], (profitErr, profitResults) => {
+                if (profitErr) {
                   return con.rollback(() => {
-                    console.error("Error creating advance payment:", advPayErr);
-                    res.status(500).json({ message: "Database error", error: advPayErr.message });
+                    console.error("Error getting profit percentage:", profitErr);
+                    res.status(500).json({ message: "Database error", error: profitErr.message });
                   });
                 }
 
-                // Update the order with the new advance amount and payment status
-                const updateSql = `
-                  UPDATE custom_orders
-                  SET advance_amount = ?,
-                      payment_status = ?
-                  WHERE order_id = ?
+                // Use the actual profit percentage from the database without defaulting
+                const profitPercentage = profitResults[0]?.profit_percentage;
+                // Calculate total amount with profit only if profit percentage exists
+                const totalAmountWithProfit = profitPercentage
+                  ? parseFloat(order.estimated_amount) * (1 + (profitPercentage / 100))
+                  : parseFloat(order.estimated_amount); // No profit if no percentage
+                const balance_amount = totalAmountWithProfit - totalPayments;
+                const payment_status = balance_amount <= 0 ? 'Fully Paid' : 'Partially Paid';
+
+                console.log(`Order ${orderId} - Estimated: ${order.estimated_amount}, Profit: ${profitPercentage}%, Total with profit: ${totalAmountWithProfit}, Payments: ${totalPayments}, Balance: ${balance_amount}`);
+
+                // Insert into advance_payments table
+                const advancePaymentSql = `
+                  INSERT INTO advance_payments (
+                    payment_reference,
+                    customer_name,
+                    payment_date,
+                    total_amount,
+                    advance_amount,
+                    balance_amount,
+                    payment_status,
+                    payment_method,
+                    notes,
+                    created_by,
+                    branch_id,
+                    is_custom_order,
+                    order_id
+                  ) VALUES (?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 `;
 
-                con.query(updateSql, [totalPayments, payment_status, orderId], (updateErr, updateResult) => {
-                  if (updateErr) {
+                con.query(advancePaymentSql, [
+                  payment_reference,
+                  order.customer_name,
+                  totalAmountWithProfit, // Use total amount with profit
+                  parseFloat(payment_amount),
+                  balance_amount,
+                  payment_status,
+                  payment_method || 'Cash',
+                  notes || 'Additional payment for custom order',
+                  order.created_by,
+                  order.branch_id,
+                  1, // is_custom_order = true
+                  orderId
+                ], (advPayErr) => {
+                  if (advPayErr) {
                     return con.rollback(() => {
-                      console.error("Error updating order:", updateErr);
-                      res.status(500).json({ message: "Database error", error: updateErr.message });
+                      console.error("Error creating advance payment:", advPayErr);
+                      res.status(500).json({ message: "Database error", error: advPayErr.message });
                     });
                   }
 
-                  // Commit transaction
-                  con.commit((commitErr) => {
-                    if (commitErr) {
+                  // Update the order with the new advance amount and payment status
+                  const updateSql = `
+                    UPDATE custom_orders
+                    SET advance_amount = ?,
+                        payment_status = ?
+                    WHERE order_id = ?
+                  `;
+
+                  con.query(updateSql, [totalPayments, payment_status, orderId], (updateErr, updateResult) => {
+                    if (updateErr) {
                       return con.rollback(() => {
-                        console.error("Error committing transaction:", commitErr);
-                        res.status(500).json({ message: "Database error", error: commitErr.message });
+                        console.error("Error updating order:", updateErr);
+                        res.status(500).json({ message: "Database error", error: updateErr.message });
                       });
                     }
 
-                    res.status(201).json({
-                      message: "Payment added successfully",
-                      payment_id: paymentResult.insertId,
-                      new_advance_amount: totalPayments,
-                      payment_status: payment_status,
-                      balance_amount: balance_amount,
-                      payment_count: paymentCount + 1,
-                      remaining_payments: Math.max(0, 3 - (paymentCount + 1))
+                    // Commit transaction
+                    con.commit((commitErr) => {
+                      if (commitErr) {
+                        return con.rollback(() => {
+                          console.error("Error committing transaction:", commitErr);
+                          res.status(500).json({ message: "Database error", error: commitErr.message });
+                        });
+                      }
+
+                      res.status(201).json({
+                        message: "Payment added successfully",
+                        payment_id: paymentResult.insertId,
+                        new_advance_amount: totalPayments,
+                        payment_status: payment_status,
+                        balance_amount: balance_amount,
+                        payment_count: paymentCount + 1,
+                        remaining_payments: Math.max(0, 3 - (paymentCount + 1))
+                      });
                     });
                   });
                 });
               });
+            });
             });
           });
         });
@@ -1113,6 +1248,316 @@ router.post("/test-email", async (req, res) => {
       error: error.message
     });
   }
+});
+
+// Get completed custom orders for store manager dashboard
+router.get("/completed", (req, res) => {
+  console.log('GET /custom-orders/completed - Fetching completed custom orders');
+
+  // Get branch_id from query parameters
+  const branchId = req.query.branch_id;
+
+  if (!branchId) {
+    return res.status(400).json({ message: "Branch ID is required" });
+  }
+
+  // SQL query to get completed custom orders for the specified branch
+  const sql = `
+    SELECT
+      co.*,
+      c.category_name,
+      s.supplier_name,
+      b.branch_name
+    FROM
+      custom_orders co
+    LEFT JOIN
+      categories c ON co.category_id = c.category_id
+    LEFT JOIN
+      suppliers s ON co.supplier_id = s.supplier_id
+    LEFT JOIN
+      branches b ON co.branch_id = b.branch_id
+    WHERE
+      co.order_status = 'Completed'
+      AND co.branch_id = ?
+    ORDER BY
+      co.order_date DESC
+  `;
+
+  con.query(sql, [branchId], (err, results) => {
+    if (err) {
+      console.error("Error fetching completed custom orders:", err);
+      return res.status(500).json({ message: "Database error", error: err.message });
+    }
+
+    res.json(results || []);
+  });
+});
+
+// Send order completion notification to customer
+router.post("/:id/send-completion-notification", async (req, res) => {
+  const orderId = req.params.id;
+  const { pickup_location } = req.body;
+
+  console.log(`POST /custom-orders/${orderId}/send-completion-notification - Sending completion notification email`);
+
+  // Get the order details with customer email
+  const sql = `
+    SELECT co.*,
+           co.customer_email as customer_email,
+           co.order_id as order_id,
+           co.customer_name as customer_name,
+           co.estimated_amount as estimated_amount,
+           co.advance_amount as advance_amount,
+           co.order_date as order_date,
+           co.estimated_completion_date as estimated_completion_date,
+           b.branch_name,
+           b.branch_address,
+           b.branch_phone
+    FROM custom_orders co
+    LEFT JOIN branches b ON co.branch_id = b.branch_id
+    WHERE co.order_id = ?
+  `;
+
+  con.query(sql, [orderId], async (err, results) => {
+    if (err) {
+      console.error("Error fetching custom order:", err);
+      return res.status(500).json({
+        success: false,
+        message: "Database error",
+        error: err.message
+      });
+    }
+
+    if (results.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Custom order not found"
+      });
+    }
+
+    const order = results[0];
+    console.log("Found order:", order);
+
+    // Check if customer email exists
+    if (!order.customer_email) {
+      console.log("No customer email found for order:", orderId);
+      return res.status(400).json({
+        success: false,
+        message: "Customer email not available for this order"
+      });
+    }
+
+    console.log("Customer email found:", order.customer_email);
+
+    try {
+      console.log(`Attempting to send completion notification to ${order.customer_email}`);
+
+      // Check if sendOrderStatusUpdate is defined
+      if (typeof sendOrderStatusUpdate !== 'function') {
+        console.error("sendOrderStatusUpdate is not a function:", sendOrderStatusUpdate);
+        return res.status(500).json({
+          success: false,
+          message: "Email service not properly initialized"
+        });
+      }
+
+      // Add pickup location to order object
+      order.pickup_location = pickup_location || order.branch_name || 'our store';
+
+      // Calculate remaining balance
+      const totalAmount = Number(order.estimated_amount) || 0;
+      const paidAmount = Number(order.advance_amount) || 0;
+      const remainingBalance = totalAmount - paidAmount;
+      order.remaining_balance = remainingBalance;
+
+      // Send the completion notification email
+      console.log("Calling sendOrderStatusUpdate with order:", order.order_id);
+      const emailResult = await sendOrderStatusUpdate(order, order.customer_email, 'Completed');
+      console.log("Email sending result:", emailResult);
+
+      if (emailResult.success) {
+        // Log the email sent in the database if email_logs table exists
+        try {
+          const logSql = `
+            INSERT INTO email_logs (
+              order_id,
+              email_type,
+              recipient_email,
+              sent_at,
+              status,
+              message_id,
+              error_message
+            ) VALUES (?, ?, ?, NOW(), ?, ?, ?)
+          `;
+
+          // Check if this is a mock email
+          const isMockEmail = emailResult.mockEmail === true;
+          const status = isMockEmail ? 'mock_sent' : 'sent';
+          const notes = isMockEmail ? 'Mock email (nodemailer not installed)' : null;
+
+          con.query(logSql, [
+            orderId,
+            'completion_notification',
+            order.customer_email,
+            status,
+            emailResult.messageId || null,
+            notes
+          ], (logErr) => {
+            if (logErr) {
+              console.error("Error logging email:", logErr);
+              // Continue anyway since the email was sent
+            } else {
+              console.log(`Email log saved to database (${isMockEmail ? 'mock' : 'real'} email)`);
+            }
+          });
+        } catch (logError) {
+          console.error("Error with email logging:", logError);
+          // Continue anyway since the email was sent
+        }
+
+        // Check if this is a mock email
+        const isMockEmail = emailResult.mockEmail === true;
+        const message = isMockEmail
+          ? "Mock completion notification email generated successfully (nodemailer not installed)"
+          : "Real completion notification email sent successfully to " + order.customer_email;
+
+        console.log("Email sending result:", {
+          success: true,
+          isMock: isMockEmail,
+          message: message,
+          messageId: emailResult.messageId
+        });
+
+        return res.status(200).json({
+          success: true,
+          message: message,
+          messageId: emailResult.messageId,
+          isMockEmail: isMockEmail
+        });
+      } else {
+        console.error("Email sending failed:", emailResult.error);
+        return res.status(500).json({
+          success: false,
+          message: "Failed to send completion notification email",
+          error: emailResult.error
+        });
+      }
+    } catch (error) {
+      console.error("Error in send-completion-notification endpoint:", error);
+      return res.status(500).json({
+        success: false,
+        message: "Server error while sending notification",
+        error: error.message
+      });
+    }
+  });
+});
+
+// Mark a custom order as picked up
+router.put("/:id/mark-as-picked-up", (req, res) => {
+  const orderId = req.params.id;
+  const { pickup_notes } = req.body;
+
+  console.log(`PUT /custom-orders/${orderId}/mark-as-picked-up - Marking order as picked up`);
+  console.log('Request body:', req.body);
+
+  // First, check if the order exists and is in "Completed" status
+  const checkSql = `
+    SELECT order_id, order_status, customer_name, customer_email
+    FROM custom_orders
+    WHERE order_id = ?
+  `;
+
+  con.query(checkSql, [orderId], (checkErr, checkResults) => {
+    if (checkErr) {
+      console.error("Error checking order status:", checkErr);
+      return res.status(500).json({ message: "Database error", error: checkErr.message });
+    }
+
+    if (checkResults.length === 0) {
+      return res.status(404).json({ message: "Order not found" });
+    }
+
+    const order = checkResults[0];
+
+    if (order.order_status !== 'Completed') {
+      return res.status(400).json({
+        message: "Order must be in 'Completed' status to be marked as picked up",
+        current_status: order.order_status
+      });
+    }
+
+    // Update the order status to "Picked Up" and set the pickup date
+    const updateSql = `
+      UPDATE custom_orders
+      SET
+        order_status = 'Picked Up',
+        pickup_date = NOW(),
+        pickup_notes = ?
+      WHERE order_id = ?
+    `;
+
+    con.query(updateSql, [pickup_notes || null, orderId], (updateErr, updateResult) => {
+      if (updateErr) {
+        console.error("Error updating order status:", updateErr);
+        return res.status(500).json({ message: "Database error", error: updateErr.message });
+      }
+
+      if (updateResult.affectedRows === 0) {
+        return res.status(500).json({ message: "Failed to update order status" });
+      }
+
+      // Return success response
+      res.json({
+        success: true,
+        message: "Order marked as picked up successfully",
+        order_id: orderId,
+        pickup_date: new Date(),
+        customer_name: order.customer_name
+      });
+    });
+  });
+});
+
+// Get completed custom orders for store manager dashboard
+router.get("/completed-orders", (req, res) => {
+  console.log('GET /custom-orders/completed-orders - Fetching completed custom orders');
+
+  // Get query parameters
+  const branchId = req.query.branch_id;
+  const includePickedUp = req.query.include_picked_up === 'true';
+
+  let sql = `
+    SELECT * FROM custom_order_details
+    WHERE order_status = 'Completed'
+  `;
+
+  // Optionally include picked up orders
+  if (includePickedUp) {
+    sql = `
+      SELECT * FROM custom_order_details
+      WHERE order_status IN ('Completed', 'Picked Up')
+    `;
+  }
+
+  // Add branch filter if provided
+  const queryParams = [];
+  if (branchId) {
+    sql += ' AND branch_id = ?';
+    queryParams.push(branchId);
+  }
+
+  // Add ORDER BY clause - newest first
+  sql += ' ORDER BY order_date DESC';
+
+  con.query(sql, queryParams, (err, results) => {
+    if (err) {
+      console.error("Error fetching completed custom orders:", err);
+      return res.status(500).json({ message: "Database error", error: err.message });
+    }
+
+    res.json(results || []);
+  });
 });
 
 export { router as customOrderRouter };

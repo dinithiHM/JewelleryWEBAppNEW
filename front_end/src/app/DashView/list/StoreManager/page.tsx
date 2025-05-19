@@ -7,6 +7,11 @@ import Pagination from "@/components/Pagination";
 import Table from "@/components/Table";
 import UserActionButtons from "@/components/UserActionButtons";
 
+type Branch = {
+  branch_id: number;
+  branch_name: string;
+};
+
 type StoreManager = {
   id: number;
   username: string;
@@ -17,13 +22,14 @@ type StoreManager = {
   phone: string;
   address: string;
   branch_id: number;
+  branch_name?: string; // Optional branch name field
 };
 
 const columns = [
   { header: "Info", accessor: "info" },
   { header: "User Name", accessor: "username", className: "hidden md:table-cell" },
   // { header: "Name", accessor: "first_name", className: "hidden md:table-cell" },
-  { header: "Branch", accessor: "branch_id", className: "hidden md:table-cell" },
+  { header: "Branch", accessor: "branch_name", className: "hidden md:table-cell" },
   { header: "NIC", accessor: "nic", className: "hidden lg:table-cell" },
   { header: "Phone", accessor: "phone", className: "hidden lg:table-cell" },
   { header: "Address", accessor: "address", className: "hidden lg:table-cell" },
@@ -36,6 +42,8 @@ const StoreManagerListPage = () => {
   const [userRole, setUserRole] = useState<string>("");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [selectedBranch, setSelectedBranch] = useState<number | null>(null);
 
   // Add delete handler
   const handleDelete = async (id: number) => {
@@ -100,15 +108,58 @@ const StoreManagerListPage = () => {
     }
   };
 
+  // Function to get branch name from branch ID
+  const getBranchName = (branchId: number): string => {
+    const branch = branches.find(b => b.branch_id === branchId);
+    if (branch) return branch.branch_name;
+
+    // Fallback if branches aren't loaded yet
+    switch (branchId) {
+      case 1:
+        return "Mahiyangana Branch";
+      case 2:
+        return "Mahaoya Branch";
+      default:
+        return `Branch ${branchId}`;
+    }
+  };
+
+  // Handle branch filter change
+  const handleBranchFilterChange = (branchId: number | null) => {
+    setSelectedBranch(branchId);
+
+    if (branchId === null) {
+      // If no branch is selected, show all managers
+      setFilteredManagers(storeManagers);
+    } else {
+      // Filter managers by selected branch
+      const filtered = storeManagers.filter(manager => manager.branch_id === branchId);
+      setFilteredManagers(filtered);
+    }
+  };
+
   // Handle search functionality
   const handleSearch = (searchTerm: string) => {
     if (!searchTerm.trim()) {
-      setFilteredManagers(storeManagers);
+      // If branch filter is active, maintain it
+      if (selectedBranch !== null) {
+        handleBranchFilterChange(selectedBranch);
+      } else {
+        setFilteredManagers(storeManagers);
+      }
       return;
     }
 
     const lowerCaseSearch = searchTerm.toLowerCase();
-    const filtered = storeManagers.filter(manager =>
+    let filtered = storeManagers;
+
+    // Apply branch filter if selected
+    if (selectedBranch !== null) {
+      filtered = filtered.filter(manager => manager.branch_id === selectedBranch);
+    }
+
+    // Then apply search filter
+    filtered = filtered.filter(manager =>
       manager.first_name.toLowerCase().includes(lowerCaseSearch) ||
       manager.last_name.toLowerCase().includes(lowerCaseSearch) ||
       manager.email.toLowerCase().includes(lowerCaseSearch) ||
@@ -126,6 +177,32 @@ const StoreManagerListPage = () => {
     if (storedRole) {
       setUserRole(storedRole);
     }
+
+    // Fetch branches
+    const fetchBranches = async () => {
+      try {
+        const response = await fetch("http://localhost:3002/branches");
+
+        if (!response.ok) {
+          console.error(`Failed to fetch branches: ${response.status}`);
+          // Set default branches if fetch fails
+          setBranches([
+            { branch_id: 1, branch_name: "Mahiyangana Branch" },
+            { branch_id: 2, branch_name: "Mahaoya Branch" }
+          ]);
+        } else {
+          const data = await response.json();
+          setBranches(data);
+        }
+      } catch (error) {
+        console.error("Error fetching branches:", error);
+        // Set default branches if fetch fails
+        setBranches([
+          { branch_id: 1, branch_name: "Mahiyangana Branch" },
+          { branch_id: 2, branch_name: "Mahaoya Branch" }
+        ]);
+      }
+    };
 
     const fetchStoreManagers = async () => {
       setIsLoading(true);
@@ -166,8 +243,28 @@ const StoreManagerListPage = () => {
       }
     };
 
+    fetchBranches();
     fetchStoreManagers();
   }, []);
+
+  // Update store managers with branch names when branches are loaded
+  useEffect(() => {
+    if (branches.length > 0 && storeManagers.length > 0) {
+      const updatedManagers = storeManagers.map(manager => ({
+        ...manager,
+        branch_name: getBranchName(manager.branch_id)
+      }));
+
+      setStoreManagers(updatedManagers);
+
+      // Update filtered managers while preserving any active filters
+      if (selectedBranch !== null) {
+        setFilteredManagers(updatedManagers.filter(manager => manager.branch_id === selectedBranch));
+      } else {
+        setFilteredManagers(updatedManagers);
+      }
+    }
+  }, [branches, storeManagers.length]);
 
 
   const renderRow = (item: StoreManager) => (
@@ -179,7 +276,7 @@ const StoreManagerListPage = () => {
         </div>
       </td>
       <td className="hidden md:table-cell">{item.username}</td>
-      <td className="hidden md:table-cell">{item.branch_id}</td>
+      <td className="hidden md:table-cell">{item.branch_name || getBranchName(item.branch_id)}</td>
       <td className="hidden lg:table-cell">{item.nic}</td>
       <td className="hidden lg:table-cell">{item.phone}</td>
       <td className="hidden lg:table-cell">{item.address}</td>
@@ -224,6 +321,20 @@ const StoreManagerListPage = () => {
         <div className="flex flex-col md:flex-row items-center gap-4 w-full md:w-auto">
           <TableSearch onSearch={handleSearch} placeholder="Search store managers..." />
           <div className="flex items-center gap-4 self-end">
+            {/* Branch Filter Dropdown */}
+            <select
+              className="border border-gray-300 rounded-md px-3 py-2 text-sm"
+              value={selectedBranch === null ? "" : selectedBranch.toString()}
+              onChange={(e) => handleBranchFilterChange(e.target.value ? parseInt(e.target.value) : null)}
+            >
+              <option value="">All Branches</option>
+              {branches.map(branch => (
+                <option key={branch.branch_id} value={branch.branch_id.toString()}>
+                  {branch.branch_name}
+                </option>
+              ))}
+            </select>
+
             <button className="w-8 h-8 flex items-center justify-center rounded-full bg-[#FFF6BD]">
               <Filter size={14} className="text-gray-700" />
             </button>

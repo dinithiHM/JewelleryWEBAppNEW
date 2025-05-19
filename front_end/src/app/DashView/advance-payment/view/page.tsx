@@ -7,7 +7,6 @@ import {
   Filter,
   ChevronDown,
   ChevronUp,
-  DollarSign,
   Calendar,
   User,
   Package,
@@ -42,6 +41,12 @@ interface AdvancePayment {
   branch_id: number;
   created_by_first_name: string;
   created_by_last_name: string;
+  // Additional properties for payment history
+  total_paid_amount?: number;
+  actual_balance_amount?: number;
+  actual_payment_status?: string;
+  running_total_paid?: number;
+  balance_after?: number;
 }
 
 // Response type for payment history API
@@ -115,13 +120,27 @@ const ViewAdvancePaymentsPage = () => {
   // Fetch branches from the backend
   const fetchBranches = async () => {
     try {
+      console.log('Fetching branches...');
       const response = await fetch('http://localhost:3002/branches');
       if (response.ok) {
         const data = await response.json();
+        console.log('Branches fetched successfully:', data);
         setBranches(data);
+      } else {
+        console.error('Failed to fetch branches:', response.status);
+        // Set default branches if API fails
+        setBranches([
+          { branch_id: 1, branch_name: 'Mahiyangana Branch' },
+          { branch_id: 2, branch_name: 'Mahaoya Branch' }
+        ]);
       }
     } catch (err) {
       console.error('Error fetching branches:', err);
+      // Set default branches if API fails
+      setBranches([
+        { branch_id: 1, branch_name: 'Mahiyangana Branch' },
+        { branch_id: 2, branch_name: 'Mahaoya Branch' }
+      ]);
     }
   };
 
@@ -179,7 +198,7 @@ const ViewAdvancePaymentsPage = () => {
 
       const data = await response.json();
 
-      // For each custom order payment, fetch the payment history to get accurate balance
+      // For each payment, fetch the payment history to get accurate balance and total paid amount
       const updatedPayments = await Promise.all(data.map(async (payment: AdvancePayment) => {
         try {
           if (payment.is_custom_order && payment.order_id) {
@@ -192,10 +211,45 @@ const ViewAdvancePaymentsPage = () => {
               // Update the payment with accurate data from history
               return {
                 ...payment,
+                total_amount: historyData.total_amount, // Use the correct total amount from history
                 total_paid_amount: historyData.total_paid,
                 actual_balance_amount: historyData.remaining_balance,
                 actual_payment_status: historyData.payment_status
               };
+            }
+          } else if (!payment.is_custom_order && payment.item_id) {
+            // Fetch payment history for inventory items
+            const historyResponse = await fetch(`http://localhost:3002/advance-payments/history/item/${payment.item_id}?customer=${encodeURIComponent(payment.customer_name)}`);
+
+            if (historyResponse.ok) {
+              const historyData = await historyResponse.json();
+
+              // Update the payment with accurate data from history
+              return {
+                ...payment,
+                total_paid_amount: historyData.total_paid,
+                actual_balance_amount: historyData.remaining_balance,
+                actual_payment_status: historyData.remaining_balance <= 0 ? 'Completed' : 'Partially Paid'
+              };
+            }
+          }
+
+          // For custom orders, also fetch the order details to get the correct total amount
+          if (payment.is_custom_order && payment.order_id) {
+            try {
+              const orderResponse = await fetch(`http://localhost:3002/custom-orders/${payment.order_id}`);
+              if (orderResponse.ok) {
+                const orderData = await orderResponse.json();
+                if (orderData.total_amount_with_profit) {
+                  // Update the payment with the correct total amount from the order
+                  return {
+                    ...payment,
+                    total_amount: orderData.total_amount_with_profit
+                  };
+                }
+              }
+            } catch (orderErr) {
+              console.error(`Error fetching order details for payment ${payment.payment_id}:`, orderErr);
             }
           }
         } catch (err) {
@@ -206,6 +260,7 @@ const ViewAdvancePaymentsPage = () => {
         return payment;
       }));
 
+      console.log('Updated payments with history data:', updatedPayments);
       setPayments(updatedPayments);
       setFilteredPayments(updatedPayments);
     } catch (err) {
@@ -333,6 +388,7 @@ const ViewAdvancePaymentsPage = () => {
           // Update the payment with accurate data from history
           const updatedPayment = {
             ...payment,
+            total_amount: historyData.total_amount || payment.total_amount, // Use the correct total amount from history
             total_paid_amount: historyData.total_paid,
             actual_balance_amount: historyData.remaining_balance,
             actual_payment_status: historyData.payment_status
@@ -357,6 +413,9 @@ const ViewAdvancePaymentsPage = () => {
           };
 
           setSelectedPayment(updatedPayment);
+
+          // Log the updated payment for debugging
+          console.log('Updated payment with total paid amount:', updatedPayment);
         }
       }
     } catch (err) {
@@ -499,7 +558,7 @@ const ViewAdvancePaymentsPage = () => {
       {/* Filters and Search */}
       <div className="bg-white p-4 rounded-lg shadow-md mb-6">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between space-y-4 md:space-y-0">
-          <div className="flex flex-wrap items-center gap-4">
+          <div className="flex flex-wrap items-center gap-4 w-full">
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                 <Search className="h-5 w-5 text-gray-400" />
@@ -514,9 +573,12 @@ const ViewAdvancePaymentsPage = () => {
             </div>
 
             <div className="flex items-center space-x-2">
-              <Filter className="h-5 w-5 text-gray-400" />
+              <div className="flex items-center">
+                <Filter className="h-5 w-5 text-gray-400 mr-2" />
+                <span className="text-sm font-medium text-gray-700 mr-2">Status:</span>
+              </div>
               <select
-                className="p-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                className="p-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500 min-w-[150px]"
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
               >
@@ -528,9 +590,12 @@ const ViewAdvancePaymentsPage = () => {
             </div>
 
             <div className="flex items-center space-x-2">
-              <Filter className="h-5 w-5 text-gray-400" />
+              <div className="flex items-center">
+                <Filter className="h-5 w-5 text-gray-400 mr-2" />
+                <span className="text-sm font-medium text-gray-700 mr-2">Type:</span>
+              </div>
               <select
-                className="p-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                className="p-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500 min-w-[150px]"
                 value={typeFilter}
                 onChange={(e) => setTypeFilter(e.target.value)}
               >
@@ -541,12 +606,16 @@ const ViewAdvancePaymentsPage = () => {
             </div>
 
             {/* Branch filter for all users */}
-            <div className="flex items-center space-x-2">
-              <Building className="h-5 w-5 text-gray-400" />
+            <div className="flex items-center space-x-2 border-l-2 border-blue-200 pl-2 ml-2">
+              <div className="flex items-center">
+                <Building className="h-5 w-5 text-blue-500 mr-2" />
+                <span className="text-sm font-medium text-blue-700 mr-2">Branch:</span>
+              </div>
+
               {userRole === 'admin' ? (
                 <div className="flex items-center space-x-2">
                   <select
-                    className="p-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                    className="p-2 border border-blue-300 rounded-md focus:ring-blue-500 focus:border-blue-500 min-w-[180px] z-50 bg-blue-50"
                     value={selectedBranchId || ''}
                     onChange={(e) => {
                       const value = e.target.value;
@@ -555,11 +624,18 @@ const ViewAdvancePaymentsPage = () => {
                     }}
                   >
                     <option value="">All Branches</option>
-                    {branches.map(branch => (
-                      <option key={branch.branch_id} value={branch.branch_id}>
-                        {branch.branch_name}
-                      </option>
-                    ))}
+                    {branches.length > 0 ? (
+                      branches.map(branch => (
+                        <option key={branch.branch_id} value={branch.branch_id}>
+                          {branch.branch_name}
+                        </option>
+                      ))
+                    ) : (
+                      <>
+                        <option value="1">Mahiyangana Branch</option>
+                        <option value="2">Mahaoya Branch</option>
+                      </>
+                    )}
                   </select>
                   <div className="flex items-center ml-2">
                     <input
@@ -578,8 +654,8 @@ const ViewAdvancePaymentsPage = () => {
                   </div>
                 </div>
               ) : (
-                <div className="flex items-center space-x-2">
-                  <span className="text-sm text-gray-700">
+                <div className="flex items-center">
+                  <span className="p-2 bg-blue-50 border border-blue-200 rounded-md text-sm text-gray-700">
                     {branches.find(b => b.branch_id === userBranchId)?.branch_name ||
                     (userBranchId === 1 ? 'Mahiyangana Branch' :
                     userBranchId === 2 ? 'Mahaoya Branch' : `Branch ${userBranchId}`)}
@@ -591,7 +667,7 @@ const ViewAdvancePaymentsPage = () => {
 
           <button
             onClick={fetchPayments}
-            className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-md flex items-center text-sm"
+            className="px-4 py-2 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-md flex items-center text-sm"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -739,10 +815,10 @@ const ViewAdvancePaymentsPage = () => {
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusBadgeColor(payment.actual_payment_status || (payment.actual_balance_amount <= 0 ? 'Completed' : payment.payment_status))}`}>
+                      <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusBadgeColor(payment.actual_payment_status || ((payment.actual_balance_amount !== undefined && payment.actual_balance_amount <= 0) ? 'Completed' : payment.payment_status))}`}>
                         <div className="flex items-center">
-                          {getStatusIcon(payment.actual_payment_status || (payment.actual_balance_amount <= 0 ? 'Completed' : payment.payment_status))}
-                          {payment.actual_payment_status || (payment.actual_balance_amount <= 0 ? 'Completed' : payment.payment_status)}
+                          {getStatusIcon(payment.actual_payment_status || ((payment.actual_balance_amount !== undefined && payment.actual_balance_amount <= 0) ? 'Completed' : payment.payment_status))}
+                          {payment.actual_payment_status || ((payment.actual_balance_amount !== undefined && payment.actual_balance_amount <= 0) ? 'Completed' : payment.payment_status)}
                         </div>
                       </span>
                     </td>
@@ -760,7 +836,7 @@ const ViewAdvancePaymentsPage = () => {
                         >
                           History
                         </button>
-                        {(payment.actual_payment_status || (payment.actual_balance_amount <= 0 ? 'Completed' : payment.payment_status)) !== 'Completed' && (
+                        {(payment.actual_payment_status || ((payment.actual_balance_amount !== undefined && payment.actual_balance_amount <= 0) ? 'Completed' : payment.payment_status)) !== 'Completed' && (
                           <button
                             onClick={() => handleMakeAdditionalPayment(payment)}
                             className="text-green-600 hover:text-green-900"
@@ -871,14 +947,14 @@ const ViewAdvancePaymentsPage = () => {
             </div>
 
             <div className="flex justify-between">
-              <span className={`px-3 py-1 inline-flex text-sm leading-5 font-semibold rounded-full ${getStatusBadgeColor(selectedPayment.actual_payment_status || (selectedPayment.actual_balance_amount <= 0 ? 'Completed' : selectedPayment.payment_status))}`}>
+              <span className={`px-3 py-1 inline-flex text-sm leading-5 font-semibold rounded-full ${getStatusBadgeColor(selectedPayment.actual_payment_status || ((selectedPayment.actual_balance_amount !== undefined && selectedPayment.actual_balance_amount <= 0) ? 'Completed' : selectedPayment.payment_status))}`}>
                 <div className="flex items-center">
-                  {getStatusIcon(selectedPayment.actual_payment_status || (selectedPayment.actual_balance_amount <= 0 ? 'Completed' : selectedPayment.payment_status))}
-                  {selectedPayment.actual_payment_status || (selectedPayment.actual_balance_amount <= 0 ? 'Completed' : selectedPayment.payment_status)}
+                  {getStatusIcon(selectedPayment.actual_payment_status || ((selectedPayment.actual_balance_amount !== undefined && selectedPayment.actual_balance_amount <= 0) ? 'Completed' : selectedPayment.payment_status))}
+                  {selectedPayment.actual_payment_status || ((selectedPayment.actual_balance_amount !== undefined && selectedPayment.actual_balance_amount <= 0) ? 'Completed' : selectedPayment.payment_status)}
                 </div>
               </span>
 
-              {(selectedPayment.actual_payment_status || (selectedPayment.actual_balance_amount <= 0 ? 'Completed' : selectedPayment.payment_status)) !== 'Completed' && (
+              {(selectedPayment.actual_payment_status || ((selectedPayment.actual_balance_amount !== undefined && selectedPayment.actual_balance_amount <= 0) ? 'Completed' : selectedPayment.payment_status)) !== 'Completed' && (
                 <button
                   onClick={() => {
                     setShowDetailsModal(false);
@@ -946,20 +1022,38 @@ const ViewAdvancePaymentsPage = () => {
                     <div className="flex justify-between mb-2">
                       <span className="text-sm font-medium text-gray-700">Payment Progress</span>
                       <span className="text-sm font-medium text-gray-700">
-                        {paymentHistory.length > 0 && 'running_total_paid' in paymentHistory[paymentHistory.length - 1] ? (
-                          `${((paymentHistory[paymentHistory.length - 1].running_total_paid / paymentHistory[0].total_amount) * 100).toFixed(1)}%`
-                        ) : (
-                          `${((paymentHistory.reduce((sum, p) => sum + parseFloat(p.advance_amount), 0) / paymentHistory[0].total_amount) * 100).toFixed(1)}%`
-                        )}
+                        {(() => {
+                          // Calculate percentage safely
+                          const lastPayment = paymentHistory.length > 0 ? paymentHistory[paymentHistory.length - 1] : null;
+                          const firstPayment = paymentHistory.length > 0 ? paymentHistory[0] : null;
+                          const totalAmount = firstPayment?.total_amount || 1;
+
+                          if (lastPayment && 'running_total_paid' in lastPayment && typeof lastPayment.running_total_paid === 'number') {
+                            return `${((lastPayment.running_total_paid / totalAmount) * 100).toFixed(1)}%`;
+                          } else {
+                            const totalPaid = paymentHistory.reduce((sum, p) => sum + parseFloat((p.advance_amount || 0).toString()), 0);
+                            return `${((totalPaid / totalAmount) * 100).toFixed(1)}%`;
+                          }
+                        })()}
                       </span>
                     </div>
                     <div className="w-full bg-gray-200 rounded-full h-2.5">
                       <div
                         className="bg-blue-600 h-2.5 rounded-full"
                         style={{
-                          width: paymentHistory.length > 0 && 'running_total_paid' in paymentHistory[paymentHistory.length - 1] ?
-                            `${Math.min(100, (paymentHistory[paymentHistory.length - 1].running_total_paid / paymentHistory[0].total_amount) * 100)}%` :
-                            `${Math.min(100, (paymentHistory.reduce((sum, p) => sum + parseFloat(p.advance_amount), 0) / paymentHistory[0].total_amount) * 100)}%`
+                          width: (() => {
+                            // Calculate width percentage safely
+                            const lastPayment = paymentHistory.length > 0 ? paymentHistory[paymentHistory.length - 1] : null;
+                            const firstPayment = paymentHistory.length > 0 ? paymentHistory[0] : null;
+                            const totalAmount = firstPayment?.total_amount || 1;
+
+                            if (lastPayment && 'running_total_paid' in lastPayment && typeof lastPayment.running_total_paid === 'number') {
+                              return `${Math.min(100, (lastPayment.running_total_paid / totalAmount) * 100)}%`;
+                            } else {
+                              const totalPaid = paymentHistory.reduce((sum, p) => sum + parseFloat((p.advance_amount || 0).toString()), 0);
+                              return `${Math.min(100, (totalPaid / totalAmount) * 100)}%`;
+                            }
+                          })()
                         }}
                       ></div>
                     </div>
@@ -968,19 +1062,35 @@ const ViewAdvancePaymentsPage = () => {
                       <div>
                         <p className="text-sm text-gray-500">Total Paid</p>
                         <p className="font-medium text-green-600">
-                          {paymentHistory.length > 0 && 'running_total_paid' in paymentHistory[paymentHistory.length - 1] ?
-                            formatCurrency(paymentHistory[paymentHistory.length - 1].running_total_paid) :
-                            formatCurrency(paymentHistory.reduce((sum, p) => sum + parseFloat(p.advance_amount), 0))
-                          }
+                          {(() => {
+                            // Calculate total paid safely
+                            const lastPayment = paymentHistory.length > 0 ? paymentHistory[paymentHistory.length - 1] : null;
+
+                            if (lastPayment && 'running_total_paid' in lastPayment && typeof lastPayment.running_total_paid === 'number') {
+                              return formatCurrency(lastPayment.running_total_paid);
+                            } else {
+                              const totalPaid = paymentHistory.reduce((sum, p) => sum + parseFloat((p.advance_amount || 0).toString()), 0);
+                              return formatCurrency(totalPaid);
+                            }
+                          })()}
                         </p>
                       </div>
                       <div>
                         <p className="text-sm text-gray-500">Remaining Balance</p>
                         <p className="font-medium text-red-600">
-                          {paymentHistory.length > 0 && 'balance_after' in paymentHistory[paymentHistory.length - 1] ?
-                            formatCurrency(paymentHistory[paymentHistory.length - 1].balance_after) :
-                            formatCurrency(paymentHistory[0].total_amount - paymentHistory.reduce((sum, p) => sum + parseFloat(p.advance_amount), 0))
-                          }
+                          {(() => {
+                            // Calculate remaining balance safely
+                            const lastPayment = paymentHistory.length > 0 ? paymentHistory[paymentHistory.length - 1] : null;
+                            const firstPayment = paymentHistory.length > 0 ? paymentHistory[0] : null;
+                            const totalAmount = firstPayment?.total_amount || 0;
+
+                            if (lastPayment && 'balance_after' in lastPayment && typeof lastPayment.balance_after === 'number') {
+                              return formatCurrency(lastPayment.balance_after);
+                            } else {
+                              const totalPaid = paymentHistory.reduce((sum, p) => sum + parseFloat((p.advance_amount || 0).toString()), 0);
+                              return formatCurrency(totalAmount - totalPaid);
+                            }
+                          })()}
                         </p>
                       </div>
                     </div>
@@ -1036,8 +1146,7 @@ const ViewAdvancePaymentsPage = () => {
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <div className="flex items-center">
-                              <DollarSign className="h-5 w-5 text-red-500 mr-1" />
-                              <span>{formatCurrency('balance_after' in payment ? payment.balance_after : payment.balance_amount)}</span>
+                              <span>{formatCurrency('balance_after' in payment && payment.balance_after !== undefined ? payment.balance_after : payment.balance_amount)}</span>
                             </div>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">

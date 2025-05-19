@@ -9,23 +9,55 @@ import {
 } from "lucide-react"; // Importing correct icons
 import { useLanguage } from "@/contexts/LanguageContext";
 
+// Function to get the dashboard URL based on user role and branch
+const getDashboardUrl = (role: string | null, branchId: string | null) => {
+  if (!role) return "/";
+
+  let baseUrl = "/";
+
+  switch (role) {
+    case "Admin":
+      baseUrl = "/DashView/admin";
+      break;
+    case "Store Manager":
+      baseUrl = "/DashView/storeManager";
+      break;
+    case "Sales Associate":
+      baseUrl = "/DashView/salesAssociate";
+      break;
+    case "Cashier":
+      baseUrl = "/DashView/cashier";
+      break;
+    default:
+      baseUrl = "/";
+  }
+
+  // If we have a branch ID and the user is not an admin (admins see all branches),
+  // add it as a query parameter
+  if (branchId && role !== "Admin") {
+    return `${baseUrl}?branch=${branchId}`;
+  }
+
+  return baseUrl;
+};
+
 const menuItems = [
   {
     title: "menu.menu",
     items: [
-      { icon: Home, label: "menu.home", href: "/", visible: ["Admin", "Store Manager", "Sales Associate", "Cashier"] },
+      { icon: Home, label: "menu.home", href: "dashboard", visible: ["Admin", "Store Manager", "Sales Associate", "Cashier"] },
       { icon: Users, label: "menu.storeManagers", href: "/DashView/list/StoreManager", visible: ["Admin"] }, // Only Admin
       { icon: Users, label: "menu.salesAssociates", href: "/DashView/list/SalesAssociate", visible: ["Admin", "Store Manager"] },
       { icon: Users, label: "menu.cashiers", href: "/DashView/list/cashier", visible: ["Admin", "Store Manager"] },
       { icon: ClipboardList, label: "menu.suppliers", href: "/DashView/list/Supplier", visible: ["Admin"] }, // Only Admin
       { icon: BarChart, label: "menu.supplierDetails", href: "/DashView/supplier-details", visible: ["Admin", "Store Manager"] },
-      { icon: ClipboardList, label: "menu.orders", href: "/DashView/orders", visible: ["Admin", "Store Manager", "Sales Associate", "Cashier"] },
-      { icon: Boxes, label: "menu.jewelleryStock", href: "/DashView/jewellery-stock", visible: ["Admin", "Store Manager", "Sales Associate"] },
+      { icon: ClipboardList, label: "menu.orders", href: "/DashView/orders", visible: ["Admin", "Store Manager", "Sales Associate"] },
+      { icon: Boxes, label: "menu.jewelleryStock", href: "/DashView/jewellery-stock", visible: ["Admin", "Store Manager", "Sales Associate","Cashier"] },
       { icon: FileText, label: "menu.assayReports", href: "/DashView/assay-reports", visible: ["Admin", "Store Manager", "Sales Associate"] },
       { icon: Coins, label: "menu.goldStock", href: "/DashView/gold-stock", visible: ["Admin", "Store Manager", "Sales Associate", "Cashier"] },
-      { icon: Tag, label: "menu.categories", href: "/DashView/categories", visible: ["Admin", "Store Manager", "Sales Associate", "Cashier"] },
+      { icon: Tag, label: "menu.categories", href: "/DashView/categories", visible: ["Admin", "Store Manager"] },
       { icon: ShoppingCart, label: "menu.sales", href: "/DashView/sales/manage", visible: ["Admin", "Store Manager", "Sales Associate", "Cashier"] },
-      { icon: BarChart, label: "menu.reports", href: "/DashView/reports", visible: ["Admin", "Store Manager"] },
+      { icon: BarChart, label: "menu.reports", href: "/DashView/reports", visible: ["Admin"] },
       // { icon: CalendarCheck, label: "menu.events", href: "/list/events", visible: ["Admin", "Store Manager", "Sales Associate", "Cashier"] },
       { icon: CreditCard, label: "menu.advancePayment", href: "/DashView/advance-payment", visible: ["Admin", "Store Manager", "Sales Associate", "Cashier"] },
       { icon: Package, label: "menu.customOrders", href: "/DashView/custom-orders", visible: ["Admin", "Store Manager", "Sales Associate"] },
@@ -44,8 +76,9 @@ const menuItems = [
 
 const Menu = () => {
   // Using the language context for translations
-  const { language, translations } = useLanguage(); // Use language context to trigger re-renders when language changes
+  const { translations } = useLanguage(); // Use language context to trigger re-renders when language changes
   const [role, setRole] = useState<string | null>(null);
+  const [branchId, setBranchId] = useState<string | null>(null);
 
   // Local translation function to avoid calling hooks conditionally
   const translate = (key: string) => {
@@ -53,12 +86,22 @@ const Menu = () => {
   };
 
   useEffect(() => {
-    const storedRole = localStorage.getItem("role"); // Get role from localStorage
-    console.log("Stored role:", storedRole); // Log the stored role
+    // Get user role from localStorage
+    const storedRole = localStorage.getItem("role");
+    console.log("Stored role:", storedRole);
+
+    // Get branch ID from localStorage
+    const storedBranchId = localStorage.getItem("branchId");
+    console.log("Stored branch ID:", storedBranchId);
+
     if (storedRole) {
       setRole(storedRole);
     } else {
       setRole("Guest");
+    }
+
+    if (storedBranchId) {
+      setBranchId(storedBranchId);
     }
   }, []);
 
@@ -76,9 +119,12 @@ const Menu = () => {
           {section.items.map((item) => {
             // Check if the user's role is listed in the 'visible' array for this item
             if (item.visible.includes(role)) {
+              // Determine the correct href
+              const href = item.href === "dashboard" ? getDashboardUrl(role, branchId) : item.href;
+
               return (
                 <Link
-                  href={item.href}
+                  href={href}
                   key={item.label}
                   className="flex items-center justify-start gap-4 text-black py-2 px-4 rounded-md hover:bg-[#F0A500] hover:text-white transition duration-200 menu-item"
                   data-no-auto-translate="true"

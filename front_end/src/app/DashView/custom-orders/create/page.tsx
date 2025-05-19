@@ -11,7 +11,8 @@ import {
   Tag,
   Upload,
   CheckCircle,
-  X
+  X,
+  Hash
 } from 'lucide-react';
 import Image from 'next/image';
 import { formatCurrency } from '@/utils/formatters';
@@ -33,6 +34,9 @@ const CreateCustomOrderPage = () => {
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerEmail, setCustomerEmail] = useState('');
   const [estimatedAmount, setEstimatedAmount] = useState<number>(0);
+  const [quantity, setQuantity] = useState<number>(1); // Default quantity to 1
+  const [profitPercentage, setProfitPercentage] = useState<number>(0); // Default to 0% instead of 10%
+  const [totalAmount, setTotalAmount] = useState<number>(0); // Estimated + profit
   const [advanceAmount, setAdvanceAmount] = useState<number>(0);
   const [balanceAmount, setBalanceAmount] = useState<number>(0);
   const [estimatedCompletionDate, setEstimatedCompletionDate] = useState('');
@@ -95,13 +99,26 @@ const CreateCustomOrderPage = () => {
     fetchData();
   }, []);
 
-  // Calculate balance amount and minimum advance payment when estimated amount changes
+  // Calculate total amount when estimated amount, quantity, or profit percentage changes
   useEffect(() => {
-    setBalanceAmount(estimatedAmount - advanceAmount);
-  }, [estimatedAmount, advanceAmount]);
+    // Calculate profit amount (limited to 15% max)
+    const effectiveProfitPercentage = Math.min(profitPercentage, 15);
+    const profitAmount = estimatedAmount * (effectiveProfitPercentage / 100);
 
-  // Calculate minimum advance payment (25% of estimated amount)
-  const minAdvancePayment = estimatedAmount * 0.25;
+    // Calculate price per unit (estimated amount + profit)
+    const pricePerUnit = estimatedAmount + profitAmount;
+
+    // Calculate total amount (price per unit * quantity)
+    const calculatedTotalAmount = pricePerUnit * quantity;
+    setTotalAmount(calculatedTotalAmount);
+
+    // Update balance amount (total - advance)
+    const calculatedBalance = calculatedTotalAmount - advanceAmount;
+    setBalanceAmount(calculatedBalance);
+  }, [estimatedAmount, quantity, profitPercentage, advanceAmount]);
+
+  // Calculate minimum advance payment (25% of total amount)
+  const minAdvancePayment = totalAmount * 0.25;
 
   // Handle file selection
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -148,15 +165,20 @@ const CreateCustomOrderPage = () => {
       return;
     }
 
-    if (advanceAmount > estimatedAmount) {
-      setError('Advance amount cannot be greater than estimated amount');
+    if (profitPercentage > 15) {
+      setError('Profit percentage cannot exceed 15%');
+      return;
+    }
+
+    if (advanceAmount > totalAmount) {
+      setError('Advance amount cannot be greater than total amount');
       return;
     }
 
     // Check if advance payment meets the minimum 25% requirement
     if (advanceAmount < minAdvancePayment) {
       const confirmProceed = window.confirm(
-        `Warning: The advance payment (Rs. ${advanceAmount.toLocaleString()}) is below the minimum required amount of Rs. ${minAdvancePayment.toLocaleString()} (25% of the estimated amount).\n\n` +
+        `Warning: The advance payment (Rs. ${advanceAmount.toLocaleString()}) is below the minimum required amount of Rs. ${minAdvancePayment.toLocaleString()} (25% of the total amount).\n\n` +
         `According to the payment policy, the first payment must be at least 25% of the total amount, and the remaining balance must be paid within the next 2 payments.\n\n` +
         `Do you want to proceed anyway?`
       );
@@ -180,6 +202,8 @@ const CreateCustomOrderPage = () => {
       formData.append('customer_phone', customerPhone);
       formData.append('customer_email', customerEmail);
       formData.append('estimated_amount', estimatedAmount.toString());
+      formData.append('quantity', quantity.toString());
+      formData.append('profit_percentage', Math.min(profitPercentage, 15).toString());
       formData.append('advance_amount', advanceAmount.toString());
 
       if (estimatedCompletionDate) {
@@ -214,8 +238,7 @@ const CreateCustomOrderPage = () => {
         formData.append('branch_id', branchId);
       }
 
-      // File uploads are now handled separately to avoid form submission issues
-      console.log('File uploads are now handled separately');
+
 
       // Log all form data for debugging
       console.log('Form data being sent to server:');
@@ -231,6 +254,26 @@ const CreateCustomOrderPage = () => {
 
       // Convert FormData to a regular object for JSON submission
       const formDataObj: Record<string, any> = {};
+
+      // Convert selected files to base64 strings
+      const filePromises = selectedFiles.map(file => {
+        return new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+      });
+
+      try {
+        // Wait for all files to be converted to base64
+        const base64Files = await Promise.all(filePromises);
+        formDataObj.selectedFiles = base64Files;
+        console.log(`Converted ${base64Files.length} files to base64 for submission`);
+      } catch (fileError) {
+        console.error('Error converting files to base64:', fileError);
+      }
+
       for (const [key, value] of formData.entries()) {
         // Convert numeric strings to numbers for the database
         if (key === 'supplier_id' || key === 'category_id' || key === 'created_by' || key === 'branch_id') {
@@ -321,6 +364,9 @@ const CreateCustomOrderPage = () => {
       setCustomerPhone('');
       setCustomerEmail('');
       setEstimatedAmount(0);
+      setQuantity(1); // Reset quantity to 1
+      setProfitPercentage(0); // Reset to 0% instead of 10%
+      setTotalAmount(0);
       setAdvanceAmount(0);
       setEstimatedCompletionDate('');
       setCategoryId(null);
@@ -580,7 +626,7 @@ const CreateCustomOrderPage = () => {
             <div className="mb-6 space-y-4">
               <div>
                 <label htmlFor="estimatedAmount" className="block text-sm font-medium text-gray-700 mb-1">
-                  Estimated Amount *
+                  Estimated Amount (Supplier Cost) *
                 </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -601,8 +647,79 @@ const CreateCustomOrderPage = () => {
               </div>
 
               <div>
+                <label htmlFor="quantity" className="block text-sm font-medium text-gray-700 mb-1">
+                  Quantity *
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <Hash className="h-5 w-5 text-gray-400" />
+                  </div>
+                  <input
+                    type="number"
+                    id="quantity"
+                    className="block w-full pl-10 p-2 border border-gray-300 rounded-md focus:ring-yellow-500 focus:border-yellow-500"
+                    placeholder="1"
+                    value={quantity || ''}
+                    onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}
+                    min="1"
+                    step="1"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label htmlFor="profitPercentage" className="block text-sm font-medium text-gray-700 mb-1">
+                  Profit Percentage <span className="text-xs text-yellow-600">(Max: 15%)</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    id="profitPercentage"
+                    className={`block w-full p-2 border ${profitPercentage > 15 ? 'border-red-500 bg-red-50' : 'border-gray-300'} rounded-md focus:ring-yellow-500 focus:border-yellow-500`}
+                    placeholder="0.00"
+                    value={profitPercentage || ''}
+                    onChange={(e) => setProfitPercentage(parseFloat(e.target.value) || 0)}
+                    min="0"
+                    max="15"
+                    step="0.01"
+                    required
+                  />
+                  <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                    <span className="text-gray-500">%</span>
+                  </div>
+                </div>
+                {profitPercentage > 15 && (
+                  <p className="mt-1 text-sm text-red-600">
+                    Profit percentage cannot exceed 15%
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label htmlFor="totalAmount" className="block text-sm font-medium text-gray-700 mb-1">
+                  Total Amount (Customer Price)
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <LKRIcon className="h-5 w-5 text-gray-400" />
+                  </div>
+                  <input
+                    type="number"
+                    id="totalAmount"
+                    className="block w-full pl-10 p-2 border border-gray-300 rounded-md bg-gray-50 focus:ring-yellow-500 focus:border-yellow-500"
+                    value={totalAmount || ''}
+                    readOnly
+                  />
+                </div>
+                <p className="mt-1 text-xs text-gray-500">
+                  (Estimated Amount + Profit) × Quantity: ({formatCurrency(estimatedAmount)} + {formatCurrency(estimatedAmount * (profitPercentage / 100))}) × {quantity}
+                </p>
+              </div>
+
+              <div>
                 <label htmlFor="advanceAmount" className="block text-sm font-medium text-gray-700 mb-1">
-                  Advance Payment <span className="text-xs text-yellow-600">(Min: 25% of Estimated Amount)</span>
+                  Advance Payment <span className="text-xs text-yellow-600">(Min: 25% of Total Amount)</span>
                 </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">

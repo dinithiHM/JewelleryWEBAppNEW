@@ -11,7 +11,7 @@ import {
   CheckCircle,
   X
 } from 'lucide-react';
-import LKRIcon from '@/components/icons/LKRIcon';
+
 import { formatCurrency } from '@/utils/formatters';
 
 // Define types
@@ -39,6 +39,10 @@ interface CustomOrder {
   special_requirements?: string;
   actual_advance_amount?: number;
   actual_balance_amount?: number;
+  profit_percentage?: number;
+  quantity?: number;
+  total_amount_with_profit?: number;
+  balance_with_profit?: number;
 }
 
 // Payment type enum
@@ -53,6 +57,7 @@ const AdvancePaymentPage = () => {
   // State for form fields
   const [paymentType, setPaymentType] = useState<PaymentType>(PaymentType.INVENTORY_ITEM);
   const [customerName, setCustomerName] = useState('');
+  const [customerEmail, setCustomerEmail] = useState('');
   const [totalAmount, setTotalAmount] = useState<number>(0);
   const [advanceAmount, setAdvanceAmount] = useState<number>(0);
   const [balanceAmount, setBalanceAmount] = useState<number>(0);
@@ -330,15 +335,26 @@ const AdvancePaymentPage = () => {
       if (order) {
         console.log('Selected order from dropdown:', order);
 
-        // Set customer name from the order
+        // Set customer name and email from the order
         setCustomerName(order.customer_name);
+        if (order.customer_email) {
+          setCustomerEmail(order.customer_email);
+        }
 
-        // Set total amount from the estimated amount
-        if (order.estimated_amount) {
-          const totalAmt = typeof order.estimated_amount === 'string' ?
-            parseFloat(order.estimated_amount) : order.estimated_amount;
-          setTotalAmount(totalAmt);
-          console.log(`Set total amount to ${totalAmt}`);
+        // If the order has total_amount_with_profit from the server, use that directly
+        if (order.total_amount_with_profit !== undefined) {
+          const serverTotalAmt = typeof order.total_amount_with_profit === 'string' ?
+            parseFloat(order.total_amount_with_profit) : order.total_amount_with_profit;
+
+          setTotalAmount(serverTotalAmt);
+          console.log(`Using server-provided total amount with profit: ${serverTotalAmt}`);
+        } else {
+          // If no total_amount_with_profit, use estimated_amount directly
+          const estimatedAmount = typeof order.estimated_amount === 'string' ?
+            parseFloat(order.estimated_amount) : (order.estimated_amount || 0);
+
+          setTotalAmount(estimatedAmount);
+          console.log(`No total_amount_with_profit provided, using estimated amount: ${estimatedAmount}`);
         }
 
         // Fetch the complete order details from the server to get accurate payment information
@@ -363,6 +379,24 @@ const AdvancePaymentPage = () => {
         // Update the selected order with the accurate data from the server
         setSelectedOrder(orderDetails);
 
+        // Always use the total_amount_with_profit from the server
+        // This is the most accurate value that includes profit and quantity
+        if (orderDetails.total_amount_with_profit !== undefined) {
+          // Use the server-provided total amount with profit
+          const totalAmountWithProfit = typeof orderDetails.total_amount_with_profit === 'string' ?
+            parseFloat(orderDetails.total_amount_with_profit) : orderDetails.total_amount_with_profit;
+
+          console.log(`Using server-provided total amount with profit: ${totalAmountWithProfit}`);
+          setTotalAmount(totalAmountWithProfit);
+        } else {
+          // If no total_amount_with_profit, use estimated_amount directly
+          const estimatedAmount = typeof orderDetails.estimated_amount === 'string' ?
+            parseFloat(orderDetails.estimated_amount) : (orderDetails.estimated_amount || 0);
+
+          console.log(`No total_amount_with_profit provided, using estimated amount: ${estimatedAmount}`);
+          setTotalAmount(estimatedAmount);
+        }
+
         // Now fetch the payment history to get the most accurate payment information
         try {
           const historyResponse = await fetch(`http://localhost:3002/advance-payments/history/order/${orderId}`);
@@ -375,8 +409,15 @@ const AdvancePaymentPage = () => {
               const updatedOrderDetails = {
                 ...orderDetails,
                 actual_advance_amount: historyData.total_paid,
-                actual_balance_amount: historyData.remaining_balance
+                actual_balance_amount: historyData.remaining_balance,
+                total_amount_with_profit: historyData.total_amount || orderDetails.total_amount_with_profit || orderDetails.estimated_amount
               };
+
+              // Make sure we're using the correct total amount from the payment history
+              if (historyData.total_amount) {
+                setTotalAmount(historyData.total_amount);
+                console.log(`Updated total amount from payment history: ${historyData.total_amount}`);
+              }
 
               console.log('Updated order details with payment history:', updatedOrderDetails);
               setSelectedOrder(updatedOrderDetails);
@@ -384,6 +425,13 @@ const AdvancePaymentPage = () => {
               // Update the balance amount field with the correct remaining balance
               setBalanceAmount(historyData.remaining_balance);
               console.log(`Setting balance from payment history: ${historyData.remaining_balance}`);
+
+              // Force update the balance amount input field immediately
+              const balanceInput = document.getElementById('balanceAmount') as HTMLInputElement;
+              if (balanceInput) {
+                balanceInput.value = historyData.remaining_balance.toString();
+                console.log('Immediately updated balance input field from history to:', historyData.remaining_balance);
+              }
 
               // Force update the balance amount input field
               setTimeout(() => {
@@ -428,15 +476,20 @@ const AdvancePaymentPage = () => {
 
           console.log(`Server reports this order has an advance payment of ${advanceAmount}`);
 
-          // Calculate the remaining balance (total - advance)
-          const totalAmt = typeof orderDetails.estimated_amount === 'string' ?
-            parseFloat(orderDetails.estimated_amount) : (orderDetails.estimated_amount || 0);
-
-          const remainingBalance = totalAmt - advanceAmount;
-          console.log(`Server calculation: Total: ${totalAmt}, Advance: ${advanceAmount}, Remaining: ${remainingBalance}`);
+          // Use the total amount from the server
+          const totalAmount = orderDetails.total_amount_with_profit || orderDetails.estimated_amount;
+          const remainingBalance = totalAmount - advanceAmount;
+          console.log(`Server calculation: Total with profit: ${totalAmount}, Advance: ${advanceAmount}, Remaining: ${remainingBalance}`);
 
           // Update the balance amount field with the server's calculation
           setBalanceAmount(remainingBalance);
+
+          // Force update the balance amount input field immediately
+          const balanceInput = document.getElementById('balanceAmount') as HTMLInputElement;
+          if (balanceInput) {
+            balanceInput.value = remainingBalance.toString();
+            console.log('Immediately updated balance input field to:', remainingBalance);
+          }
 
           // Force update the balance amount input field
           setTimeout(() => {
@@ -525,19 +578,55 @@ const AdvancePaymentPage = () => {
     // If this is a custom order with existing advance payment, account for it
     else if (selectedOrder && selectedOrder.advance_amount && selectedOrder.advance_amount > 0) {
       // Get the existing advance amount from the server data
-      const existingAdvance = typeof selectedOrder.advance_amount === 'string' ?
-        parseFloat(selectedOrder.advance_amount) : selectedOrder.advance_amount;
+      const existingAdvance = selectedOrder.actual_advance_amount !== undefined ?
+        selectedOrder.actual_advance_amount :
+        (typeof selectedOrder.advance_amount === 'string' ?
+          parseFloat(selectedOrder.advance_amount) : selectedOrder.advance_amount);
 
-      // Get the total amount
-      const totalAmt = typeof selectedOrder.estimated_amount === 'string' ?
-        parseFloat(selectedOrder.estimated_amount) : (selectedOrder.estimated_amount || 0);
+      // Get the total amount with profit if available
+      let totalAmt;
+      if (selectedOrder.total_amount_with_profit !== undefined) {
+        totalAmt = typeof selectedOrder.total_amount_with_profit === 'string' ?
+          parseFloat(selectedOrder.total_amount_with_profit) : selectedOrder.total_amount_with_profit;
+        console.log(`Using server-provided total amount with profit in useEffect: ${totalAmt}`);
+      } else {
+        // Use the estimated amount directly
+        totalAmt = typeof selectedOrder.estimated_amount === 'string' ?
+          parseFloat(selectedOrder.estimated_amount) : (selectedOrder.estimated_amount || 0);
+        console.log(`No total_amount_with_profit in useEffect, using estimated amount: ${totalAmt}`);
+      }
 
       // For custom orders, we don't auto-update the balance when the advance amount changes
       // Only set it once when the component mounts
       if (advanceAmount === 0) {
-        const remainingBalance = totalAmt - existingAdvance;
-        setBalanceAmount(remainingBalance);
-        console.log(`Setting initial balance for custom order: ${totalAmt} - ${existingAdvance} = ${remainingBalance}`);
+        // Use the actual balance amount if available, otherwise calculate it
+        if (selectedOrder.actual_balance_amount !== undefined) {
+          setBalanceAmount(selectedOrder.actual_balance_amount);
+          console.log(`Setting initial balance from actual balance: ${selectedOrder.actual_balance_amount}`);
+
+          // Force update the balance amount input field
+          setTimeout(() => {
+            const balanceInput = document.getElementById('balanceAmount') as HTMLInputElement;
+            if (balanceInput) {
+              const balanceValue = selectedOrder.actual_balance_amount || 0;
+              balanceInput.value = balanceValue.toString();
+              console.log('Directly updated balance input field to:', balanceValue);
+            }
+          }, 100);
+        } else {
+          const remainingBalance = totalAmt - existingAdvance;
+          setBalanceAmount(remainingBalance);
+          console.log(`Setting initial balance for custom order: ${totalAmt} - ${existingAdvance} = ${remainingBalance}`);
+
+          // Force update the balance amount input field
+          setTimeout(() => {
+            const balanceInput = document.getElementById('balanceAmount') as HTMLInputElement;
+            if (balanceInput) {
+              balanceInput.value = remainingBalance.toString();
+              console.log('Directly updated balance input field to:', remainingBalance);
+            }
+          }, 100);
+        }
       }
     } else {
       // Normal calculation for new payments
@@ -553,6 +642,7 @@ const AdvancePaymentPage = () => {
     setSelectedItemId(null);
     setSelectedOrderId(null);
     setCustomerName('');
+    setCustomerEmail('');
     setTotalAmount(0);
     setAdvanceAmount(0);
     setQuantity(1);
@@ -631,6 +721,7 @@ const AdvancePaymentPage = () => {
     // Prepare data for submission
     const paymentData: any = {
       customer_name: customerName,
+      customer_email: customerEmail,
       total_amount: totalAmount,
       advance_amount: advanceAmount,
       payment_method: paymentMethod,
@@ -665,16 +756,28 @@ const AdvancePaymentPage = () => {
     }
     // If this is a custom order with existing advance payment, include it
     else if (paymentType === PaymentType.CUSTOM_ORDER && selectedOrder?.advance_amount) {
-      const existingAdvance = typeof selectedOrder.advance_amount === 'string' ?
-        parseFloat(selectedOrder.advance_amount) : selectedOrder.advance_amount;
+      // Get the existing advance amount from the server data
+      const existingAdvance = selectedOrder.actual_advance_amount !== undefined ?
+        selectedOrder.actual_advance_amount :
+        (typeof selectedOrder.advance_amount === 'string' ?
+          parseFloat(selectedOrder.advance_amount) : selectedOrder.advance_amount);
 
       // Include the existing advance amount from the server
       paymentData.existing_advance_amount = existingAdvance;
       console.log(`Including existing advance amount from server: ${existingAdvance}`);
 
-      // Get the total amount from the server data
-      const totalAmt = typeof selectedOrder.estimated_amount === 'string' ?
-        parseFloat(selectedOrder.estimated_amount) : (selectedOrder.estimated_amount || 0);
+      // Get the total amount with profit if available
+      let totalAmt;
+      if (selectedOrder.total_amount_with_profit !== undefined) {
+        totalAmt = typeof selectedOrder.total_amount_with_profit === 'string' ?
+          parseFloat(selectedOrder.total_amount_with_profit) : selectedOrder.total_amount_with_profit;
+        console.log(`Using server-provided total amount with profit in form submission: ${totalAmt}`);
+      } else {
+        // Use the estimated amount directly
+        totalAmt = typeof selectedOrder.estimated_amount === 'string' ?
+          parseFloat(selectedOrder.estimated_amount) : (selectedOrder.estimated_amount || 0);
+        console.log(`No total_amount_with_profit in form submission, using estimated amount: ${totalAmt}`);
+      }
 
       // Calculate the balance amount: total - (existing + new)
       const calculatedBalance = totalAmt - (existingAdvance + advanceAmount);
@@ -722,6 +825,7 @@ const AdvancePaymentPage = () => {
       }
 
       setCustomerName('');
+      setCustomerEmail('');
       setTotalAmount(0);
       setAdvanceAmount(0);
       setNotes('');
@@ -913,7 +1017,7 @@ const AdvancePaymentPage = () => {
                 {customOrders.length > 0 ? (
                   customOrders.map(order => (
                     <option key={order.order_id} value={order.order_id}>
-                      {order.order_reference} - {order.customer_name} - {formatCurrency(order.estimated_amount || order.total_amount)}
+                      {order.order_reference} - {order.customer_name} - {formatCurrency(order.total_amount_with_profit || order.total_amount || order.estimated_amount || 0)}
                       {order.advance_amount && order.advance_amount > 0 ? ` (Advance: ${formatCurrency(order.advance_amount)})` : ''}
                     </option>
                   ))
@@ -929,7 +1033,7 @@ const AdvancePaymentPage = () => {
                 <br />
                 <strong>Current advance payment:</strong> {formatCurrency(selectedOrder.actual_advance_amount || selectedOrder.advance_amount || 0)}
                 <br />
-                <strong>Remaining balance:</strong> {formatCurrency(selectedOrder.actual_balance_amount || (selectedOrder.estimated_amount - (selectedOrder.advance_amount || 0)) || 0)}
+                <strong>Remaining balance:</strong> {formatCurrency(selectedOrder.actual_balance_amount || (totalAmount - (selectedOrder.advance_amount || 0)) || 0)}
                 <br />
                 <span className="text-green-700">Any amount entered below will be an additional payment.</span>
               </div>
@@ -938,23 +1042,46 @@ const AdvancePaymentPage = () => {
         )}
 
         {/* Customer Information */}
-        <div className="mb-6">
-          <label htmlFor="customerName" className="block text-sm font-medium text-gray-700 mb-1">
-            Customer Name
-          </label>
-          <div className="relative">
-            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-              <User className="h-5 w-5 text-gray-400" />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+          <div>
+            <label htmlFor="customerName" className="block text-sm font-medium text-gray-700 mb-1">
+              Customer Name
+            </label>
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <User className="h-5 w-5 text-gray-400" />
+              </div>
+              <input
+                type="text"
+                id="customerName"
+                className="block w-full pl-10 p-2 border border-gray-300 rounded-md focus:ring-yellow-500 focus:border-yellow-500"
+                placeholder="Enter customer name"
+                value={customerName}
+                onChange={(e) => setCustomerName(e.target.value)}
+                readOnly={paymentType === PaymentType.CUSTOM_ORDER && !!selectedOrder}
+              />
             </div>
-            <input
-              type="text"
-              id="customerName"
-              className="block w-full pl-10 p-2 border border-gray-300 rounded-md focus:ring-yellow-500 focus:border-yellow-500"
-              placeholder="Enter customer name"
-              value={customerName}
-              onChange={(e) => setCustomerName(e.target.value)}
-              readOnly={paymentType === PaymentType.CUSTOM_ORDER && !!selectedOrder}
-            />
+          </div>
+          <div>
+            <label htmlFor="customerEmail" className="block text-sm font-medium text-gray-700 mb-1">
+              Customer Email
+            </label>
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                  <polyline points="22,6 12,13 2,6"></polyline>
+                </svg>
+              </div>
+              <input
+                type="email"
+                id="customerEmail"
+                className="block w-full pl-10 p-2 border border-gray-300 rounded-md focus:ring-yellow-500 focus:border-yellow-500"
+                placeholder="Enter customer email"
+                value={customerEmail}
+                onChange={(e) => setCustomerEmail(e.target.value)}
+              />
+            </div>
           </div>
         </div>
 
@@ -966,12 +1093,12 @@ const AdvancePaymentPage = () => {
             </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <LKRIcon className="h-5 w-5 text-gray-400" />
+                <span className="text-gray-500 font-medium">Rs.</span>
               </div>
               <input
                 type="number"
                 id="totalAmount"
-                className="block w-full pl-10 p-2 border border-gray-300 rounded-md focus:ring-yellow-500 focus:border-yellow-500"
+                className="block w-full pl-12 p-2 border border-gray-300 rounded-md focus:ring-yellow-500 focus:border-yellow-500"
                 placeholder="0.00"
                 value={totalAmount || ''}
                 onChange={(e) => setTotalAmount(parseFloat(e.target.value) || 0)}
@@ -991,12 +1118,12 @@ const AdvancePaymentPage = () => {
             </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <LKRIcon className="h-5 w-5 text-gray-400" />
+                <span className="text-gray-500 font-medium">Rs.</span>
               </div>
               <input
                 type="number"
                 id="advanceAmount"
-                className="block w-full pl-10 p-2 border border-gray-300 rounded-md focus:ring-yellow-500 focus:border-yellow-500"
+                className="block w-full pl-12 p-2 border border-gray-300 rounded-md focus:ring-yellow-500 focus:border-yellow-500"
                 placeholder="0.00"
                 value={advanceAmount || ''}
                 onChange={(e) => {
@@ -1030,16 +1157,16 @@ const AdvancePaymentPage = () => {
             </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <LKRIcon className="h-5 w-5 text-gray-400" />
+                <span className="text-gray-500 font-medium">Rs.</span>
               </div>
               <input
                 type="number"
                 id="balanceAmount"
-                className="block w-full pl-10 p-2 border border-gray-300 rounded-md bg-gray-50 focus:ring-yellow-500 focus:border-yellow-500"
-                value={selectedOrder?.actual_balance_amount || balanceAmount || ''}
+                className="block w-full pl-12 p-2 border border-gray-300 rounded-md bg-gray-50 focus:ring-yellow-500 focus:border-yellow-500"
+                value={balanceAmount || ''}
                 readOnly
                 // Add key to force re-render when balance changes
-                key={`balance-${selectedOrder?.actual_balance_amount || balanceAmount}-${Date.now()}`}
+                key={`balance-${balanceAmount}-${Date.now()}`}
               />
             </div>
           </div>

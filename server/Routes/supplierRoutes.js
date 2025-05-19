@@ -489,42 +489,134 @@ router.get("/my-orders/:supplierId", (req, res) => {
         return order;
       });
 
-      // Next, get custom orders for this supplier
-      con.query(
-        `SELECT
-          co.*,
-          'custom' as order_type,
-          c.category_name as category
-        FROM
-          custom_orders co
-        LEFT JOIN
-          categories c ON co.category_id = c.category_id
-        WHERE
-          co.supplier_id = ?
-        ORDER BY
-          co.order_date DESC`,
-        [supplierId],
-        (customErr, customOrders) => {
-          if (customErr) {
-            console.error("Database error fetching supplier custom orders:", customErr);
-            return res.status(500).json({ message: "Database error", error: customErr.message });
-          }
-
-          console.log(`Found ${customOrders.length} custom orders for supplier ${supplierId}`);
-
-          // Combine both types of orders
-          const allOrders = [...processedRegularOrders, ...customOrders];
-
-          // Sort by date (newest first)
-          allOrders.sort((a, b) => {
-            const dateA = a.order_type === 'custom' ? new Date(a.order_date) : new Date(a.created_at);
-            const dateB = b.order_type === 'custom' ? new Date(b.order_date) : new Date(b.created_at);
-            return dateB - dateA;
-          });
-
-          res.json(allOrders);
+      // Check if order_items table exists and fetch items for each order
+      con.query("SHOW TABLES LIKE 'order_items'", (itemsTableErr, itemsTableResults) => {
+        if (itemsTableErr) {
+          console.error("Error checking for order_items table:", itemsTableErr);
+          // Continue without items
+          fetchCustomOrders(processedRegularOrders);
+          return;
         }
-      );
+
+        const orderItemsTableExists = itemsTableResults.length > 0;
+
+        if (orderItemsTableExists && regularOrders.length > 0) {
+          // Get all order IDs
+          const orderIds = regularOrders.map(order => order.order_id);
+
+          // Create placeholders for IN clause
+          const placeholders = orderIds.map(() => '?').join(',');
+
+          // Fetch all items for these orders
+          const itemsSql = `SELECT * FROM order_items WHERE order_id IN (${placeholders})`;
+
+          con.query(itemsSql, orderIds, (itemsErr, itemsResults) => {
+            if (itemsErr) {
+              console.error("Error fetching order items:", itemsErr);
+              // Continue without items
+              fetchCustomOrders(processedRegularOrders);
+              return;
+            }
+
+            // Process image URLs for items
+            const processedItems = (itemsResults || []).map(item => {
+              if (item.design_image) {
+                const baseUrl = `http://localhost:3002`;
+                const imagePath = item.design_image.startsWith('uploads/')
+                  ? item.design_image
+                  : `uploads/${item.design_image}`;
+                item.design_image_url = `${baseUrl}/${imagePath}`;
+              }
+              return item;
+            });
+
+            // Group items by order_id
+            const itemsByOrderId = {};
+            processedItems.forEach(item => {
+              if (!itemsByOrderId[item.order_id]) {
+                itemsByOrderId[item.order_id] = [];
+              }
+              itemsByOrderId[item.order_id].push(item);
+            });
+
+            // Add items to each order
+            processedRegularOrders.forEach(order => {
+              order.items = itemsByOrderId[order.order_id] || [];
+              order.itemsCount = order.items.length;
+            });
+
+            // Continue with custom orders
+            fetchCustomOrders(processedRegularOrders);
+          });
+        } else {
+          // No items table or no orders, continue with custom orders
+          fetchCustomOrders(processedRegularOrders);
+        }
+      });
+
+      // Function to fetch custom orders and combine with regular orders
+      function fetchCustomOrders(processedRegularOrders) {
+        // Next, get custom orders for this supplier
+        con.query(
+          `SELECT
+            co.*,
+            'custom' as order_type,
+            c.category_name as category
+          FROM
+            custom_orders co
+          LEFT JOIN
+            categories c ON co.category_id = c.category_id
+          WHERE
+            co.supplier_id = ?
+          ORDER BY
+            co.order_date DESC`,
+          [supplierId],
+          (customErr, customOrders) => {
+            if (customErr) {
+              console.error("Database error fetching supplier custom orders:", customErr);
+              return res.status(500).json({ message: "Database error", error: customErr.message });
+            }
+
+            console.log(`Found ${customOrders.length} custom orders for supplier ${supplierId}`);
+
+            // Process custom orders to handle images
+            const processedCustomOrders = customOrders.map(order => {
+              // Process images if they exist
+              if (order.images) {
+                // Clean up image paths to just filenames
+                const imagesList = order.images.split(',').filter(img => img.trim());
+                const processedImagesList = imagesList.map(imagePath => {
+                  if (imagePath) {
+                    // Extract just the filename if it's a path
+                    if (imagePath.includes('/')) {
+                      return imagePath.split('/').pop();
+                    }
+                    return imagePath;
+                  }
+                  return '';
+                }).filter(img => img);
+
+                // Join back into a comma-separated string
+                order.images = processedImagesList.join(',');
+              }
+
+              return order;
+            });
+
+            // Combine both types of orders
+            const allOrders = [...processedRegularOrders, ...processedCustomOrders];
+
+            // Sort by date (newest first)
+            allOrders.sort((a, b) => {
+              const dateA = a.order_type === 'custom' ? new Date(a.order_date) : new Date(a.created_at);
+              const dateB = b.order_type === 'custom' ? new Date(b.order_date) : new Date(b.created_at);
+              return dateB - dateA;
+            });
+
+            res.json(allOrders);
+          }
+        );
+      }
     }
   );
 });
@@ -558,6 +650,164 @@ router.put("/update-order-status/:orderId", (req, res) => {
     }
 
     res.json({ message: "Order status updated successfully" });
+  });
+});
+
+// Update order item status
+router.put("/update-order-item-status/:orderItemId", (req, res) => {
+  const orderItemId = req.params.orderItemId;
+  const { status, supplier_notes } = req.body;
+
+  if (!orderItemId || !status) {
+    return res.status(400).json({ message: "Order item ID and status are required" });
+  }
+
+  console.log(`Updating order item ${orderItemId} status to ${status}`);
+
+  // First, check if the order_items table exists
+  con.query("SHOW TABLES LIKE 'order_items'", (tableErr, tableResults) => {
+    if (tableErr) {
+      console.error("Error checking for order_items table:", tableErr);
+      return res.status(500).json({ message: "Database error", error: tableErr.message });
+    }
+
+    if (tableResults.length === 0) {
+      return res.status(404).json({ message: "Order items table not found" });
+    }
+
+    // Update the order item status
+    const sql = supplier_notes
+      ? "UPDATE order_items SET status = ?, supplier_notes = ?, updated_at = NOW() WHERE order_item_id = ?"
+      : "UPDATE order_items SET status = ?, updated_at = NOW() WHERE order_item_id = ?";
+
+    const values = supplier_notes
+      ? [status, supplier_notes, orderItemId]
+      : [status, orderItemId];
+
+    con.query(sql, values, (err, result) => {
+      if (err) {
+        console.error("Database error updating order item status:", err);
+        return res.status(500).json({ message: "Database error", error: err.message });
+      }
+
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ message: "Order item not found" });
+      }
+
+      // Get the updated order item to return in the response
+      con.query("SELECT * FROM order_items WHERE order_item_id = ?", [orderItemId], (selectErr, selectResults) => {
+        if (selectErr) {
+          console.error("Error fetching updated order item:", selectErr);
+          return res.json({
+            message: "Order item status updated successfully",
+            order_item_id: orderItemId,
+            status: status
+          });
+        }
+
+        // Process image URL if needed
+        if (selectResults.length > 0) {
+          const updatedItem = selectResults[0];
+          if (updatedItem.design_image) {
+            const baseUrl = `http://localhost:3002`;
+            const imagePath = updatedItem.design_image.startsWith('uploads/')
+              ? updatedItem.design_image
+              : `uploads/${updatedItem.design_image}`;
+            updatedItem.design_image_url = `${baseUrl}/${imagePath}`;
+          }
+
+          res.json({
+            message: "Order item status updated successfully",
+            order_item: updatedItem
+          });
+        } else {
+          res.json({
+            message: "Order item status updated successfully",
+            order_item_id: orderItemId,
+            status: status
+          });
+        }
+      });
+    });
+  });
+});
+
+// Update order item status
+router.put("/update-order-item-status/:orderItemId", (req, res) => {
+  const orderItemId = req.params.orderItemId;
+  const { status, supplier_notes } = req.body;
+
+  if (!orderItemId || !status) {
+    return res.status(400).json({ message: "Order item ID and status are required" });
+  }
+
+  console.log(`Updating order item ${orderItemId} status to ${status}`);
+
+  // First, check if the order_items table exists
+  con.query("SHOW TABLES LIKE 'order_items'", (tableErr, tableResults) => {
+    if (tableErr) {
+      console.error("Error checking for order_items table:", tableErr);
+      return res.status(500).json({ message: "Database error", error: tableErr.message });
+    }
+
+    if (tableResults.length === 0) {
+      return res.status(404).json({ message: "Order items table not found" });
+    }
+
+    // Update the order item status
+    const sql = supplier_notes
+      ? "UPDATE order_items SET status = ?, supplier_notes = ?, updated_at = NOW() WHERE order_item_id = ?"
+      : "UPDATE order_items SET status = ?, updated_at = NOW() WHERE order_item_id = ?";
+
+    const values = supplier_notes
+      ? [status, supplier_notes, orderItemId]
+      : [status, orderItemId];
+
+    con.query(sql, values, (err, result) => {
+      if (err) {
+        console.error("Database error updating order item status:", err);
+        return res.status(500).json({ message: "Database error", error: err.message });
+      }
+
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ message: "Order item not found" });
+      }
+
+      // Get the updated order item to return in the response
+      con.query("SELECT * FROM order_items WHERE order_item_id = ?", [orderItemId], (selectErr, selectResults) => {
+        if (selectErr) {
+          console.error("Error fetching updated order item:", selectErr);
+          return res.json({
+            message: "Order item status updated successfully",
+            order_item_id: orderItemId,
+            status: status
+          });
+        }
+
+        // Process image URL if needed
+        if (selectResults.length > 0) {
+          const updatedItem = selectResults[0];
+          if (updatedItem.design_image) {
+            const baseUrl = `http://localhost:3002`;
+            const imagePath = updatedItem.design_image.startsWith('uploads/')
+              ? updatedItem.design_image
+              : `uploads/${updatedItem.design_image}`;
+            updatedItem.design_image_url = `${baseUrl}/${imagePath}`;
+          }
+
+          res.json({
+            message: "Order item status updated successfully",
+            order_item: updatedItem
+          });
+        } else {
+          res.json({
+            message: "Order item status updated successfully",
+            order_item_id: orderItemId,
+            status: status
+          });
+        }
+      });
+    });
   });
 });
 

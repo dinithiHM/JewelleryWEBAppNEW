@@ -482,6 +482,42 @@ router.post('/check-availability', (req, res) => {
   });
 });
 
+/**
+ * Permanently delete a gold stock item
+ */
+router.delete('/:id', (req, res) => {
+  console.log(`DELETE /gold-stock/${req.params.id} - Permanently deleting gold stock item`);
 
+  const stockId = req.params.id;
+
+  const sql = `
+    DELETE FROM gold_stock
+    WHERE stock_id = ?
+  `;
+
+  con.query(sql, [stockId], (err, result) => {
+    if (err) {
+      console.error('Error deleting gold stock item:', err);
+      return res.status(500).json({
+        success: false,
+        message: 'Database error',
+        error: err.message
+      });
+    }
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Gold stock item not found'
+      });
+    }
+
+    console.log(`Permanently deleted gold stock item ${stockId}`);
+    return res.json({
+      success: true,
+      message: 'Gold stock item permanently deleted successfully'
+    });
+  });
+});
 
 export { router as goldStockRouter };

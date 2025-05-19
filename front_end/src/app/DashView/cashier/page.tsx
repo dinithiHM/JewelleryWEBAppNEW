@@ -1,20 +1,77 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { BarChart, Users, ShoppingCart, Tag, Coins, CreditCard, Calculator } from 'lucide-react';
+import { ShoppingCart, CreditCard, Clock } from 'lucide-react';
 import { useLanguage } from "@/contexts/LanguageContext";
 import TranslatedText from "@/components/TranslatedText";
+import GoldPriceTable from "@/components/GoldPriceTable";
+import axios from 'axios';
 
 const CashierPage: React.FC = () => {
     // Use language context to trigger re-renders when language changes
     useLanguage();
     const [userName, setUserName] = useState<string>('');
     const [branchName, setBranchName] = useState<string>('');
+    const [branchId, setBranchId] = useState<string | null>(null);
+    const [todaySalesAmount, setTodaySalesAmount] = useState<string>('0');
+    const [todayTransactions, setTodayTransactions] = useState<string>('0');
+    const [isLoading, setIsLoading] = useState<boolean>(true);
+    const [recentSales, setRecentSales] = useState<any[]>([]);
+
+    // Fetch dashboard data
+    const fetchDashboardData = async (branchId: string | null) => {
+        setIsLoading(true);
+        try {
+            // Fetch today's sales amount
+            let url = 'http://localhost:3002/dashboard-counts/today-sales';
+            if (branchId) {
+                url += `?branch_id=${branchId}`;
+            }
+
+            const salesResponse = await fetch(url);
+            if (salesResponse.ok) {
+                const salesData = await salesResponse.json();
+                // Format the sales amount with commas
+                setTodaySalesAmount(`LKR ${Number(salesData.total_amount).toLocaleString()}`);
+            }
+
+            // Fetch today's transactions count
+            let recentSalesUrl = 'http://localhost:3002/sales/recent';
+            const params: any = {};
+
+            if (branchId) {
+                params.branch_id = branchId;
+            }
+
+            const transactionsResponse = await axios.get(recentSalesUrl, { params });
+            if (transactionsResponse.data && Array.isArray(transactionsResponse.data)) {
+                // Count unique sale_ids to get the number of transactions
+                const uniqueSaleIds = new Set();
+                transactionsResponse.data.forEach((sale: any) => {
+                    if (sale.sale_id) {
+                        uniqueSaleIds.add(sale.sale_id);
+                    }
+                });
+                setTodayTransactions(uniqueSaleIds.size.toString());
+
+                // Store recent sales for display in the table
+                setRecentSales(transactionsResponse.data.slice(0, 5)); // Limit to 5 most recent
+            }
+        } catch (error) {
+            console.error('Error fetching dashboard data:', error);
+            setTodaySalesAmount('LKR 0');
+            setTodayTransactions('0');
+            setRecentSales([]);
+        } finally {
+            setIsLoading(false);
+        }
+    };
 
     useEffect(() => {
         // Get user info from localStorage if available
         const storedName = localStorage.getItem('userName');
         const storedBranch = localStorage.getItem('branchName');
+        const storedBranchId = localStorage.getItem('branchId');
 
         if (storedName) {
             setUserName(storedName);
@@ -24,12 +81,36 @@ const CashierPage: React.FC = () => {
             setBranchName(storedBranch);
         } else {
             // Fallback: Try to get branch ID and map it
-            const branchId = localStorage.getItem('branchId');
-            if (branchId === '1') {
+            if (storedBranchId === '1') {
                 setBranchName('Mahiyangana Branch');
-            } else if (branchId === '2') {
+            } else if (storedBranchId === '2') {
                 setBranchName('Mahaoya Branch');
             }
+        }
+
+        // Check if there's a branch parameter in the URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const branchParam = urlParams.get('branch');
+
+        // Use branch from URL if available, otherwise use from localStorage
+        const branchToUse = branchParam || storedBranchId;
+
+        if (branchToUse) {
+            setBranchId(branchToUse);
+            // Fetch dashboard data for this branch
+            fetchDashboardData(branchToUse);
+
+            // If branch name isn't set yet, set it based on the branch ID
+            if (!storedBranch) {
+                if (branchToUse === '1') {
+                    setBranchName('Mahiyangana Branch');
+                } else if (branchToUse === '2') {
+                    setBranchName('Mahaoya Branch');
+                }
+            }
+        } else {
+            // Fetch dashboard data without branch filter
+            fetchDashboardData(null);
         }
     }, []);
 
@@ -53,44 +134,58 @@ const CashierPage: React.FC = () => {
     return (
         <div className="p-6">
             <div className="mb-8">
-                <h1 className="text-2xl font-bold text-gray-800">Cashier Dashboard</h1>
-                <p className="text-gray-600 mt-1">
-                    Welcome back{userName ? `, ${userName}` : ''}!
-                    {branchName && <span> You are assigned to <strong>{branchName}</strong>.</span>}
-                </p>
+                <div className="flex justify-between items-center">
+                    <div>
+                        <h1 className="text-2xl font-bold text-gray-800">Cashier Dashboard</h1>
+                        <p className="text-gray-600 mt-1">
+                            Welcome back{userName ? `, ${userName}` : ''}!
+                            {branchName && <span> You are assigned to <strong>{branchName}</strong>.</span>}
+                        </p>
+                    </div>
+                    <button
+                        onClick={() => {
+                            if (branchId) {
+                                fetchDashboardData(branchId);
+                            } else {
+                                fetchDashboardData(null);
+                            }
+                        }}
+                        className="px-3 py-1.5 bg-blue-50 text-blue-600 rounded-md flex items-center hover:bg-blue-100 transition-colors"
+                        title="Refresh dashboard data"
+                    >
+                        <Clock className="mr-1" size={16} />
+                        Refresh Data
+                    </button>
+                </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6 mb-8">
                 <DashboardCard
                     icon={ShoppingCart}
                     title="Today's Transactions"
-                    value="32"
+                    value={isLoading ? "Loading..." : todayTransactions}
                     color="border-l-4 border-blue-500"
                 />
                 <DashboardCard
                     icon={CreditCard}
                     title="Total Sales"
-                    value="LKR 78,500"
+                    value={isLoading ? "Loading..." : todaySalesAmount}
                     color="border-l-4 border-green-500"
-                />
-                <DashboardCard
-                    icon={Calculator}
-                    title="Cash Balance"
-                    value="LKR 45,200"
-                    color="border-l-4 border-purple-500"
-                />
-                <DashboardCard
-                    icon={Coins}
-                    title="Gold Price"
-                    value="LKR 5,842/g"
-                    color="border-l-4 border-yellow-500"
                 />
             </div>
 
             <div className="bg-white p-6 rounded-lg shadow-md mb-8">
                 <div className="flex justify-between items-center mb-4">
                     <h2 className="text-xl font-bold">Recent Transactions</h2>
-                    <button className="text-blue-500 hover:text-blue-700">View All</button>
+                    <button
+                        onClick={() => {
+                            // Navigate to sales view page
+                            window.location.href = '/DashView/sales/view';
+                        }}
+                        className="text-blue-500 hover:text-blue-700"
+                    >
+                        View All
+                    </button>
                 </div>
                 <div className="overflow-x-auto">
                     <table className="min-w-full divide-y divide-gray-200">
@@ -101,102 +196,47 @@ const CashierPage: React.FC = () => {
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Payment Method</th>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Time</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product</th>
                             </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-gray-200">
-                            <tr>
-                                <td className="px-6 py-4 whitespace-nowrap">TRX-2023-001</td>
-                                <td className="px-6 py-4 whitespace-nowrap">Amal Perera</td>
-                                <td className="px-6 py-4 whitespace-nowrap">LKR 12,500</td>
-                                <td className="px-6 py-4 whitespace-nowrap">Cash</td>
-                                <td className="px-6 py-4 whitespace-nowrap">10:30 AM</td>
-                                <td className="px-6 py-4 whitespace-nowrap"><span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Completed</span></td>
-                            </tr>
-                            <tr>
-                                <td className="px-6 py-4 whitespace-nowrap">TRX-2023-002</td>
-                                <td className="px-6 py-4 whitespace-nowrap">Nimal Silva</td>
-                                <td className="px-6 py-4 whitespace-nowrap">LKR 8,750</td>
-                                <td className="px-6 py-4 whitespace-nowrap">Credit Card</td>
-                                <td className="px-6 py-4 whitespace-nowrap">11:45 AM</td>
-                                <td className="px-6 py-4 whitespace-nowrap"><span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Completed</span></td>
-                            </tr>
-                            <tr>
-                                <td className="px-6 py-4 whitespace-nowrap">TRX-2023-003</td>
-                                <td className="px-6 py-4 whitespace-nowrap">Kamala Jayawardene</td>
-                                <td className="px-6 py-4 whitespace-nowrap">LKR 3,250</td>
-                                <td className="px-6 py-4 whitespace-nowrap">Debit Card</td>
-                                <td className="px-6 py-4 whitespace-nowrap">1:15 PM</td>
-                                <td className="px-6 py-4 whitespace-nowrap"><span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">Pending</span></td>
-                            </tr>
+                            {isLoading ? (
+                                <tr>
+                                    <td colSpan={6} className="px-6 py-4 text-center">
+                                        <div className="flex justify-center items-center">
+                                            <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-blue-500 mr-2"></div>
+                                            Loading transactions...
+                                        </div>
+                                    </td>
+                                </tr>
+                            ) : recentSales.length === 0 ? (
+                                <tr>
+                                    <td colSpan={6} className="px-6 py-4 text-center text-gray-500">
+                                        No transactions found for today
+                                    </td>
+                                </tr>
+                            ) : (
+                                recentSales.map((sale, index) => (
+                                    <tr key={`${sale.sale_id}-${index}`}>
+                                        <td className="px-6 py-4 whitespace-nowrap">#{sale.sale_id}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap">{sale.customer_name || 'Walk-in Customer'}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap">
+                                            Rs. {Number(sale.total_amount).toLocaleString()}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap">{sale.payment_method || 'Cash'}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap">{sale.sale_time || new Date(sale.sale_date).toLocaleTimeString()}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap">{sale.product_title || 'Multiple Items'}</td>
+                                    </tr>
+                                ))
+                            )}
                         </tbody>
                     </table>
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="bg-white p-6 rounded-lg shadow-md">
-                    <h2 className="text-xl font-bold mb-4">Payment Methods Summary</h2>
-                    <div className="space-y-4">
-                        <div className="flex justify-between items-center">
-                            <div className="flex items-center">
-                                <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center mr-4">
-                                    <CreditCard className="text-blue-500" size={24} />
-                                </div>
-                                <div>
-                                    <p className="font-medium">Credit Card</p>
-                                    <p className="text-sm text-gray-500">12 transactions</p>
-                                </div>
-                            </div>
-                            <p className="font-bold">LKR 45,000</p>
-                        </div>
-                        <div className="flex justify-between items-center">
-                            <div className="flex items-center">
-                                <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center mr-4">
-                                    <Coins className="text-green-500" size={24} />
-                                </div>
-                                <div>
-                                    <p className="font-medium">Cash</p>
-                                    <p className="text-sm text-gray-500">15 transactions</p>
-                                </div>
-                            </div>
-                            <p className="font-bold">LKR 28,500</p>
-                        </div>
-                        <div className="flex justify-between items-center">
-                            <div className="flex items-center">
-                                <div className="w-12 h-12 rounded-full bg-purple-100 flex items-center justify-center mr-4">
-                                    <CreditCard className="text-purple-500" size={24} />
-                                </div>
-                                <div>
-                                    <p className="font-medium">Debit Card</p>
-                                    <p className="text-sm text-gray-500">5 transactions</p>
-                                </div>
-                            </div>
-                            <p className="font-bold">LKR 5,000</p>
-                        </div>
-                    </div>
-                </div>
-
-                <div className="bg-white p-6 rounded-lg shadow-md">
-                    <h2 className="text-xl font-bold mb-4">Quick Actions</h2>
-                    <div className="grid grid-cols-2 gap-4">
-                        <button className="p-4 bg-blue-50 rounded-lg flex flex-col items-center justify-center hover:bg-blue-100 transition duration-200">
-                            <ShoppingCart className="text-blue-500 mb-2" size={24} />
-                            <span className="text-sm font-medium">New Sale</span>
-                        </button>
-                        <button className="p-4 bg-green-50 rounded-lg flex flex-col items-center justify-center hover:bg-green-100 transition duration-200">
-                            <Calculator className="text-green-500 mb-2" size={24} />
-                            <span className="text-sm font-medium">Cash Register</span>
-                        </button>
-                        <button className="p-4 bg-purple-50 rounded-lg flex flex-col items-center justify-center hover:bg-purple-100 transition duration-200">
-                            <CreditCard className="text-purple-500 mb-2" size={24} />
-                            <span className="text-sm font-medium">Payment</span>
-                        </button>
-                        <button className="p-4 bg-yellow-50 rounded-lg flex flex-col items-center justify-center hover:bg-yellow-100 transition duration-200">
-                            <BarChart className="text-yellow-500 mb-2" size={24} />
-                            <span className="text-sm font-medium">Daily Report</span>
-                        </button>
-                    </div>
+            <div className="w-full">
+                <div className="bg-white rounded-lg shadow-md">
+                    <GoldPriceTable />
                 </div>
             </div>
         </div>

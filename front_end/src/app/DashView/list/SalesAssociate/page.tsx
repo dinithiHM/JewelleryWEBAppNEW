@@ -15,6 +15,7 @@ interface SalesAssociate {
   email: string;
   username: string;
   branch_id: number;
+  branch_name?: string; // Add branch name
   nic: string;
   phone: string;
   address: string;
@@ -44,6 +45,7 @@ const SalesAssociateListPage = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<string>("");
+  const [selectedBranch, setSelectedBranch] = useState<number | null>(null);
 
   // Add delete handler
   const handleDelete = async (id: number) => {
@@ -113,71 +115,102 @@ const SalesAssociateListPage = () => {
     }
   };
 
+  // Function to filter sales associates by branch
+  const filterByBranch = (associates: SalesAssociate[], branchId: number | null) => {
+    if (!branchId) return associates;
+    return associates.filter(associate => associate.branch_id === branchId);
+  };
+
+
+
+  // Function to fetch sales associates
+  const fetchSalesAssociates = async () => {
+    try {
+      setIsLoading(true);
+      const response = await fetch("http://localhost:3002/sales-associates");
+      if (!response.ok) {
+        throw new Error('Failed to fetch sales associates');
+      }
+      const data = await response.json();
+
+      if (Array.isArray(data)) {
+        // Log the first item to see its structure
+        if (data.length > 0) {
+          console.log('Sample sales associate data:', data[0]);
+        }
+
+        // Map the data to ensure it has the correct property names
+        const mappedData = data.map(item => ({
+          id: item.user_id || item.id, // Try both possible ID field names
+          first_name: item.first_name,
+          last_name: item.last_name,
+          email: item.email,
+          username: item.username,
+          branch_id: item.branch_id,
+          branch_name: item.branch_name, // Include branch name
+          nic: item.nic,
+          phone: item.phone,
+          address: item.address
+        }));
+
+        setSalesAssociates(mappedData);
+
+        // Apply branch filter if selected
+        if (selectedBranch) {
+          setFilteredAssociates(filterByBranch(mappedData, selectedBranch));
+        } else {
+          setFilteredAssociates(mappedData);
+        }
+      } else {
+        throw new Error('Invalid data format received');
+      }
+    } catch (error) {
+      console.error("Error fetching Sales Associates:", error);
+      setError(error instanceof Error ? error.message : 'An error occurred');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Handle branch filter change
+  const handleBranchFilterChange = (branchId: number | null) => {
+    setSelectedBranch(branchId);
+    setFilteredAssociates(filterByBranch(salesAssociates, branchId));
+  };
+
   useEffect(() => {
-    // Get role from localStorage
+    // Get role and branch from localStorage
     const storedRole = localStorage.getItem("role");
+    const storedBranchId = localStorage.getItem("branchId");
+
     if (storedRole) {
       setUserRole(storedRole);
     }
 
-    // Check database structure to debug
-    const checkDatabaseStructure = async () => {
-      try {
-        const response = await fetch("http://localhost:3002/sales-associates/check-table-structure");
-        if (response.ok) {
-          const data = await response.json();
-          console.log("Database structure for users table:", data);
-        }
-      } catch (error) {
-        console.error("Error checking database structure:", error);
+    if (storedBranchId) {
+      const branchId = parseInt(storedBranchId);
+
+      // If user is not admin, automatically filter by their branch
+      if (storedRole !== "Admin") {
+        setSelectedBranch(branchId);
       }
-    };
+    }
 
-    checkDatabaseStructure();
-
-    const fetchSalesAssociates = async () => {
-      try {
-        setIsLoading(true);
-        const response = await fetch("http://localhost:3002/sales-associates");
-        if (!response.ok) {
-          throw new Error('Failed to fetch sales associates');
-        }
-        const data = await response.json();
-
-        if (Array.isArray(data)) {
-          // Log the first item to see its structure
-          if (data.length > 0) {
-            console.log('Sample sales associate data:', data[0]);
-          }
-
-          // Map the data to ensure it has the correct property names
-          const mappedData = data.map(item => ({
-            id: item.user_id || item.id, // Try both possible ID field names
-            first_name: item.first_name,
-            last_name: item.last_name,
-            email: item.email,
-            username: item.username,
-            branch_id: item.branch_id,
-            nic: item.nic,
-            phone: item.phone,
-            address: item.address
-          }));
-
-          setSalesAssociates(mappedData);
-          setFilteredAssociates(mappedData);
-        } else {
-          throw new Error('Invalid data format received');
-        }
-      } catch (error) {
-        console.error("Error fetching Sales Associates:", error);
-        setError(error instanceof Error ? error.message : 'An error occurred');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
+    // Fetch sales associates
     fetchSalesAssociates();
   }, []);
+
+  // Function to get branch name from branch ID
+  const getBranchName = (branchId: number): string => {
+    switch (branchId) {
+      case 1:
+        return "Mahiyangana Branch";
+      case 2:
+        return "Mahaoya Branch";
+      default:
+        return `Branch ${branchId}`;
+    }
+  };
 
   const renderRow = (item: SalesAssociate) => (
     <tr key={item.id} className="border-b border-gray-200 even:bg-[#FFF6BD] text-sm hover:bg-[#FDE68A]">
@@ -188,7 +221,7 @@ const SalesAssociateListPage = () => {
         </div>
       </td>
       <td className="hidden md:table-cell">{item.username}</td>
-      <td className="hidden md:table-cell">{item.branch_id}</td>
+      <td className="hidden md:table-cell">{getBranchName(item.branch_id)}</td>
       <td className="hidden lg:table-cell">{item.nic}</td>
       <td className="hidden lg:table-cell">{item.phone}</td>
       <td className="hidden lg:table-cell">{item.address}</td>
@@ -251,10 +284,28 @@ const SalesAssociateListPage = () => {
         <h1 className="hidden md:block text-lg font-semibold">Sales Associates</h1>
         <div className="flex flex-col md:flex-row items-center gap-4 w-full md:w-auto">
           <TableSearch onSearch={handleSearch} placeholder="Search sales associates..." />
+
+          {/* Branch Filter Dropdown */}
+          <div className="relative">
+            <select
+              className="appearance-none bg-white border border-gray-300 rounded-md py-2 px-3 pr-8 text-sm leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500"
+              value={selectedBranch || ""}
+              onChange={(e) => {
+                const value = e.target.value;
+                const branchId = value ? parseInt(value) : null;
+                handleBranchFilterChange(branchId);
+              }}
+            >
+              <option value="">All Branches</option>
+              <option value="1">Mahiyangana Branch</option>
+              <option value="2">Mahaoya Branch</option>
+            </select>
+            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-700">
+              <Filter size={14} />
+            </div>
+          </div>
+
           <div className="flex items-center gap-4 self-end">
-            <button className="w-8 h-8 flex items-center justify-center rounded-full bg-[#FFF6BD]">
-              <Filter size={14} className="text-gray-700" />
-            </button>
             <button className="w-8 h-8 flex items-center justify-center rounded-full bg-[#FFF6BD]">
               <SortDesc size={14} className="text-gray-700" />
             </button>

@@ -7,15 +7,44 @@ import Link from 'next/link';
 import { Eye, LogOut, RefreshCw } from 'lucide-react';
 
 // Regular order interface
+interface OrderItem {
+  order_item_id: number;
+  order_id: number;
+  category: string;
+  quantity: number;
+  offer_gold: number;
+  selected_karats: string;
+  karat_values: string;
+  design_image?: string;
+  design_image_url?: string;
+  status: string;
+  gold_price_per_gram?: number;
+  weight_in_grams?: number;
+  making_charges?: number;
+  additional_materials_charges?: number;
+  base_estimated_price?: number;
+  estimated_price?: number;
+  total_amount?: number;
+  selectedKarat?: string;
+  goldPurity?: number;
+  offered_gold_value?: number;
+  created_at: string;
+  updated_at?: string;
+  supplier_notes?: string;
+}
+
 interface RegularOrder {
   order_id: number;
   category: string;
   quantity?: number;
   status?: string;
   created_at?: string;
+  design_image?: string;
   design_image_url?: string;
   supplier_notes?: string;
   order_type: 'regular';
+  items?: OrderItem[];
+  itemsCount?: number;
 }
 
 // Custom order interface
@@ -34,6 +63,8 @@ interface CustomOrder {
   description?: string;
   special_requirements?: string;
   order_reference?: string;
+  images?: string;
+  quantity?: number;
 }
 
 // Combined type for order operations
@@ -58,6 +89,8 @@ export default function SupplierDashboard() {
   const [showOrderModal, setShowOrderModal] = useState(false);
   const [statusUpdate, setStatusUpdate] = useState('');
   const [notes, setNotes] = useState('');
+  const [activeItemTab, setActiveItemTab] = useState(0);
+  const [selectedItem, setSelectedItem] = useState<OrderItem | null>(null);
   const router = useRouter();
 
   // Check if user is logged in
@@ -95,9 +128,17 @@ export default function SupplierDashboard() {
 
       const data = await response.json();
 
-      // Separate orders by type
-      const regular = data.filter(order => order.order_type === 'regular') as RegularOrder[];
-      const custom = data.filter(order => order.order_type === 'custom') as CustomOrder[];
+      // Separate orders by type in a single pass
+      const regular: RegularOrder[] = [];
+      const custom: CustomOrder[] = [];
+
+      data.forEach((order: any) => {
+        if (order.order_type === 'regular') {
+          regular.push(order as RegularOrder);
+        } else if (order.order_type === 'custom') {
+          custom.push(order as CustomOrder);
+        }
+      });
 
       setRegularOrders(regular);
       setCustomOrders(custom);
@@ -124,41 +165,76 @@ export default function SupplierDashboard() {
 
   const handleViewOrder = (order: Order) => {
     setSelectedOrder(order);
+    setActiveItemTab(0);
 
-    // Use order_status for custom orders, status for regular orders
-    if (order.order_type === 'custom') {
-      const customOrder = order as CustomOrder;
-      setStatusUpdate(customOrder.order_status || 'Pending');
-    } else {
+    // For regular orders with items, select the first item by default
+    if (order.order_type === 'regular') {
       const regularOrder = order as RegularOrder;
-      setStatusUpdate(regularOrder.status || 'Pending');
+
+      if (regularOrder.items && regularOrder.items.length > 0) {
+        // Select the first item
+        setSelectedItem(regularOrder.items[0]);
+        setStatusUpdate(regularOrder.items[0].status || 'Pending');
+        setNotes(regularOrder.items[0].supplier_notes || '');
+      } else {
+        // No items, use the order status
+        setSelectedItem(null);
+        setStatusUpdate(regularOrder.status || 'Pending');
+        setNotes(regularOrder.supplier_notes || '');
+      }
+    } else {
+      // For custom orders
+      const customOrder = order as CustomOrder;
+      setSelectedItem(null);
+      setStatusUpdate(customOrder.order_status || 'Pending');
+      setNotes(customOrder.supplier_notes || '');
     }
 
-    setNotes(order.supplier_notes || '');
     setShowOrderModal(true);
+  };
+
+  const handleSelectItem = (item: OrderItem, index: number) => {
+    setSelectedItem(item);
+    setActiveItemTab(index);
+    setStatusUpdate(item.status || 'Pending');
+    setNotes(item.supplier_notes || '');
   };
 
   const handleUpdateStatus = async () => {
     if (!selectedOrder) return;
 
     try {
-      // Different endpoints for regular vs custom orders
-      const endpoint = selectedOrder.order_type === 'custom'
-        ? `http://localhost:3002/custom-orders/update-status/${selectedOrder.order_id}`
-        : `http://localhost:3002/suppliers/update-order-status/${selectedOrder.order_id}`;
+      let endpoint, payload, response;
 
-      // Different payload structure for each type
-      const payload = selectedOrder.order_type === 'custom'
-        ? {
-            order_status: statusUpdate,
-            supplier_notes: notes,
-          }
-        : {
-            status: statusUpdate,
-            supplier_notes: notes,
-          };
+      // Different handling based on order type and whether an item is selected
+      if (selectedOrder.order_type === 'custom') {
+        // For custom orders, update the whole order
+        endpoint = `http://localhost:3002/custom-orders/${selectedOrder.order_id}/status`;
+        payload = {
+          order_status: statusUpdate,
+          supplier_notes: notes,
+        };
+      } else if (selectedItem) {
+        // For regular orders with a selected item, update just that item
+        endpoint = `http://localhost:3002/suppliers/update-order-item-status/${selectedItem.order_item_id}`;
+        payload = {
+          status: statusUpdate,
+          supplier_notes: notes,
+        };
+      } else {
+        // For regular orders without items, update the whole order
+        endpoint = `http://localhost:3002/suppliers/update-order-status/${selectedOrder.order_id}`;
+        payload = {
+          status: statusUpdate,
+          supplier_notes: notes,
+        };
+      }
 
-      const response = await fetch(endpoint, {
+      console.log(`Updating ${selectedOrder.order_type} ${selectedItem ? 'item' : 'order'}`);
+      console.log('Endpoint:', endpoint);
+      console.log('Payload:', payload);
+
+      response = await fetch(endpoint, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -166,29 +242,69 @@ export default function SupplierDashboard() {
         body: JSON.stringify(payload),
       });
 
+      const responseData = await response.json();
+      console.log('Response:', responseData);
+
       if (!response.ok) {
-        throw new Error(`Failed to update ${selectedOrder.order_type} order status`);
+        console.error('Error response:', responseData);
+        throw new Error(`Failed to update status: ${responseData.message || response.statusText}`);
       }
 
-      // Update the order in the local state
-      setOrders(orders.map(order => {
-        if (order.order_id === selectedOrder.order_id) {
-          if (order.order_type === 'custom') {
+      // Update the local state based on what was updated
+      if (selectedOrder.order_type === 'custom') {
+        // Update custom order
+        setCustomOrders(customOrders.map(order => {
+          if (order.order_id === selectedOrder.order_id) {
             return { ...order, order_status: statusUpdate, supplier_notes: notes };
-          } else {
+          }
+          return order;
+        }));
+      } else if (selectedItem) {
+        // Update the specific item in the regular order
+        setRegularOrders(regularOrders.map(order => {
+          if (order.order_id === selectedOrder.order_id && order.items) {
+            // Create a new array of items with the updated item
+            const updatedItems = order.items.map(item => {
+              if (item.order_item_id === selectedItem.order_item_id) {
+                return { ...item, status: statusUpdate, supplier_notes: notes };
+              }
+              return item;
+            });
+
+            // Return the order with updated items
+            return { ...order, items: updatedItems };
+          }
+          return order;
+        }));
+      } else {
+        // Update the regular order status
+        setRegularOrders(regularOrders.map(order => {
+          if (order.order_id === selectedOrder.order_id) {
             return { ...order, status: statusUpdate, supplier_notes: notes };
           }
-        }
-        return order;
-      }));
-
-      setShowOrderModal(false);
+          return order;
+        }));
+      }
 
       // Show success message
-      alert('Order status updated successfully');
+      alert('Status updated successfully');
+
+      // Close the modal if it's a custom order or a regular order without items
+      if (selectedOrder.order_type === 'custom' || !selectedItem) {
+        setShowOrderModal(false);
+      }
     } catch (err: any) {
-      alert(err.message || 'An error occurred while updating the order');
+      console.error('Error updating status:', err);
+      alert(err.message || 'An error occurred while updating the status');
     }
+  };
+
+  // Helper function to determine if all items in an order are completed
+  const areAllItemsCompleted = (order: RegularOrder) => {
+    if (order.items && order.items.length > 0) {
+      return order.items.every(item => item.status?.toLowerCase() === 'completed');
+    }
+    return false;
   };
 
   const getStatusBadgeColor = (status: string) => {
@@ -355,10 +471,10 @@ export default function SupplierDashboard() {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                            getStatusBadgeColor(order.status || 'Pending')
+                            getStatusBadgeColor(areAllItemsCompleted(order) ? 'completed' : (order.status || 'Pending'))
                           }`}>
-                            {(order.status || 'Pending').charAt(0).toUpperCase() +
-                             (order.status || 'Pending').slice(1)}
+                            {(areAllItemsCompleted(order) ? 'Completed' : (order.status || 'Pending')).charAt(0).toUpperCase() +
+                             (areAllItemsCompleted(order) ? 'Completed' : (order.status || 'Pending')).slice(1)}
                           </span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
@@ -503,7 +619,16 @@ export default function SupplierDashboard() {
                           </div>
                           <div>
                             <p className="text-sm text-gray-500">Estimated Amount</p>
-                            <p className="font-medium">Rs. {selectedOrder.estimated_amount?.toLocaleString() || '0'}</p>
+                            <p className="font-medium">
+                              Rs. {selectedOrder.estimated_amount?.toLocaleString() || '0'}
+                              {selectedOrder.quantity && selectedOrder.quantity > 1 ?
+                                ` × ${selectedOrder.quantity} items = Rs. ${((selectedOrder.estimated_amount || 0) * (selectedOrder.quantity || 1)).toLocaleString()}`
+                                : ''}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-sm text-gray-500">Quantity</p>
+                            <p className="font-medium">{selectedOrder.quantity || 1}</p>
                           </div>
                         </>
                       ) : (
@@ -519,12 +644,7 @@ export default function SupplierDashboard() {
                         </>
                       )}
 
-                      <div>
-                        <p className="text-sm text-gray-500">Date</p>
-                        <p className="font-medium">
-                          {formatDate(selectedOrder.order_type === 'custom' ? selectedOrder.order_date || '' : selectedOrder.created_at || '')}
-                        </p>
-                      </div>
+
                       <div>
                         <p className="text-sm text-gray-500">Current Status</p>
                         <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
@@ -553,19 +673,164 @@ export default function SupplierDashboard() {
                       )}
                     </div>
 
-                    {selectedOrder.design_image_url && (
+                    {/* Custom Order Images */}
+                    {selectedOrder.order_type === 'custom' && selectedOrder.images && (
                       <div className="mt-4">
-                        <p className="text-sm text-gray-500 mb-2">Design Image</p>
-                        <div className="relative h-48 w-full">
-                          <Image
-                            src={selectedOrder.design_image_url}
-                            alt={`Design for order #${selectedOrder.order_id}`}
-                            fill
-                            style={{ objectFit: 'contain' }}
-                            className="rounded-md"
-                          />
+                        <p className="text-sm text-gray-500 mb-2">Design Images</p>
+                        <div className="grid grid-cols-2 gap-2">
+                          {selectedOrder.images.split(',').filter(img => img.trim()).map((imagePath, index) => (
+                            <div key={index} className="relative h-40 w-full">
+                              <Image
+                                src={`http://localhost:3002/uploads/custom_orders/${imagePath.trim()}`}
+                                alt={`Design image ${index + 1}`}
+                                fill
+                                style={{ objectFit: 'contain' }}
+                                className="rounded-md"
+                                onError={(e) => {
+                                  // Fallback if image fails to load
+                                  const imgElement = e.target as HTMLImageElement;
+                                  if (imgElement.src.includes('custom_orders')) {
+                                    imgElement.src = `http://localhost:3002/uploads/${imagePath.trim()}`;
+                                  } else {
+                                    console.error(`Failed to load image: ${imagePath}`);
+                                    imgElement.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9IiNlZWUiLz48dGV4dCB4PSI1MCUiIHk9IjUwJSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjE0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjOTk5Ij5JbWFnZSBub3QgZm91bmQ8L3RleHQ+PC9zdmc+';
+                                  }
+                                }}
+                              />
+                            </div>
+                          ))}
                         </div>
                       </div>
+                    )}
+
+                    {selectedOrder.order_type === 'regular' && (
+                      <>
+                        {/* Order Items Tabs - Only show if there are items */}
+                        {(selectedOrder as RegularOrder).items && (selectedOrder as RegularOrder).items!.length > 0 ? (
+                          <div className="mt-4">
+                            <h4 className="text-sm font-medium text-gray-700 mb-2">Order Items</h4>
+
+                            {/* Tabs Navigation */}
+                            <div className="border-b border-gray-200">
+                              <nav className="flex -mb-px overflow-x-auto">
+                                {(selectedOrder as RegularOrder).items!.map((item, index) => (
+                                  <button
+                                    key={item.order_item_id || index}
+                                    className={`whitespace-nowrap py-2 px-4 border-b-2 font-medium text-sm ${
+                                      index === activeItemTab
+                                        ? 'border-yellow-500 text-yellow-600'
+                                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                                    }`}
+                                    onClick={() => handleSelectItem(item, index)}
+                                  >
+                                    Item #{index + 1}
+                                  </button>
+                                ))}
+                              </nav>
+                            </div>
+
+                            {/* Item Details */}
+                            {(selectedOrder as RegularOrder).items!.map((item, index) => (
+                              <div
+                                key={item.order_item_id || index}
+                                className={`mt-4 ${index === activeItemTab ? 'block' : 'hidden'}`}
+                              >
+                                <div className="grid grid-cols-2 gap-4">
+                                  <div>
+                                    <p className="text-sm text-gray-500">Category</p>
+                                    <p className="font-medium">{item.category}</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-sm text-gray-500">Quantity</p>
+                                    <p className="font-medium">{item.quantity}</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-sm text-gray-500">Status</p>
+                                    <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                                      getStatusBadgeColor(item.status || 'Pending')
+                                    }`}>
+                                      {(item.status || 'Pending').charAt(0).toUpperCase() +
+                                       (item.status || 'Pending').slice(1)}
+                                    </span>
+                                  </div>
+                                  <div>
+                                    <p className="text-sm text-gray-500">Gold Provided</p>
+                                    <p className="font-medium">{item.offer_gold ? 'Yes' : 'No'}</p>
+                                  </div>
+
+                                  {/* Additional fields for all order items */}
+                                  <div>
+                                    <p className="text-sm text-gray-500">Selected Karats</p>
+                                    <p className="font-medium">
+                                      {typeof item.selected_karats === 'string'
+                                        ? JSON.parse(item.selected_karats).join(', ')
+                                        : Array.isArray(item.selected_karats)
+                                          ? (item.selected_karats as string[]).join(', ')
+                                          : item.selectedKarat || 'N/A'}
+                                    </p>
+                                  </div>
+                                  <div>
+                                    <p className="text-sm text-gray-500">Weight (grams)</p>
+                                    <p className="font-medium">{item.weight_in_grams ? Number(item.weight_in_grams).toFixed(2) : 'N/A'}</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-sm text-gray-500">Making Charges</p>
+                                    <p className="font-medium">Rs. {item.making_charges ? Number(item.making_charges).toLocaleString() : 'N/A'}</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-sm text-gray-500">Additional Materials</p>
+                                    <p className="font-medium">Rs. {item.additional_materials_charges ? Number(item.additional_materials_charges).toLocaleString() : 'N/A'}</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-sm text-gray-500">Estimated Price</p>
+                                    <p className="font-medium">Rs. {item.estimated_price ? Number(item.estimated_price).toLocaleString() : 'N/A'}</p>
+                                  </div>
+                                </div>
+
+                                {/* Item Image */}
+                                <div className="mt-4">
+                                  <p className="text-sm text-gray-500 mb-2">Design Image</p>
+                                  {item.design_image_url ? (
+                                    <div className="relative h-48 w-full">
+                                      <Image
+                                        src={item.design_image_url}
+                                        alt={`Design for item #${index + 1}`}
+                                        fill
+                                        style={{ objectFit: 'contain' }}
+                                        className="rounded-md"
+                                      />
+                                    </div>
+                                  ) : (
+                                    <div className="h-48 w-full flex items-center justify-center bg-gray-100 rounded-md">
+                                      <p className="text-gray-500">No design image available</p>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          // Show order image if no items
+                          <div className="mt-4">
+                            <p className="text-sm text-gray-500 mb-2">Design Image</p>
+                            {(selectedOrder as RegularOrder).design_image ? (
+                              <div className="relative h-48 w-full">
+                                <Image
+                                  src={`http://localhost:3002/${(selectedOrder as RegularOrder).design_image}`}
+                                  alt={`Design for order #${selectedOrder.order_id}`}
+                                  fill
+                                  style={{ objectFit: 'contain' }}
+                                  className="rounded-md"
+                                />
+                              </div>
+                            ) : (
+                              <div className="h-48 w-full flex items-center justify-center bg-gray-100 rounded-md">
+                                <p className="text-gray-500">No design image available</p>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </>
                     )}
 
                     <div className="mt-4">
@@ -609,7 +874,8 @@ export default function SupplierDashboard() {
                   className="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-yellow-600 text-base font-medium text-white hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500 sm:ml-3 sm:w-auto sm:text-sm"
                   onClick={handleUpdateStatus}
                 >
-                  Update Order
+                  {selectedOrder.order_type === 'custom' ? 'Update Order' :
+                   selectedItem ? `Update Item #${activeItemTab + 1}` : 'Update Order'}
                 </button>
                 <button
                   type="button"

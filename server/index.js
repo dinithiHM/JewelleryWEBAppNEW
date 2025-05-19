@@ -21,13 +21,14 @@ import { salesRouter } from "./Routes/salesRoutes.js"; // ✅ Import Sales Route
 import { saleItemsRouter } from "./Routes/saleItemsRoutes.js"; // ✅ Import Sale Items Routes
 import cashierRouter from "./Routes/cashierRoutes.new.js"; // ✅ Import Cashier Routes
 import { advancePaymentRouter } from "./Routes/advancePaymentRoutes.js"; // ✅ Import Advance Payment Routes
-import { customOrderRouter } from "./Routes/customOrderRoutes.simple.js"; // ✅ Import Simplified Custom Order Routes
+import { customOrderRouter } from "./Routes/customOrderRoutes.simple.fixed.js"; // ✅ Import Fixed Simplified Custom Order Routes
 import { categoryRouter } from "./Routes/categoryRoutes.js"; // ✅ Import Category Routes
 import { dashboardCountsRouter } from "./Routes/dashboardCountsRoutes.js"; // ✅ Import Dashboard Counts Routes
 import fixPaymentStatusRouter from "./Routes/fixPaymentStatusRoute.js"; // ✅ Import Fix Payment Status Routes
 import { fixMissingAdvancePaymentsRouter } from "./Routes/fixMissingAdvancePaymentsRoute.js"; // ✅ Import Fix Missing Advance Payments Routes
 import { fixAllAdvancePaymentsRouter } from "./Routes/fixAllAdvancePaymentsRoute.js"; // ✅ Import Fix All Advance Payments Routes
 import { fixPaymentStatusDirectlyRouter } from "./Routes/fixPaymentStatusDirectly.js"; // ✅ Import Fix Payment Status Directly Routes
+import { fixCustomOrderTotalAmountRouter } from "./Routes/fixCustomOrderTotalAmountRoute.js"; // ✅ Import Fix Custom Order Total Amount Routes
 import branchesRouter from "./Routes/branchesRoutes.js"; // ✅ Import Branches Routes
 import { assayReportRouter } from "./Routes/assayReportRoutes.new.js"; // ✅ Import Assay Report Routes
 import { authRouter } from "./Routes/authRoute.js"; // ✅ Import Auth Routes
@@ -39,6 +40,7 @@ import { goldStockRouter } from "./Routes/goldStockRoutes.js"; // ✅ Import Gol
 import reportsRouter from "./Routes/reportsRoutes.js"; // ✅ Import Reports Routes
 import userPasswordResetRouter from "./Routes/userPasswordResetRoute.js"; // ✅ Import User Password Reset Routes
 import adminPasswordResetRouter from "./Routes/adminPasswordResetRoute.js"; // ✅ Import Admin Password Reset Routes
+import completedOrdersRouter from "./Routes/completedOrdersRoute.js"; // ✅ Import Completed Orders Route
 
 const app = express();
 
@@ -96,6 +98,7 @@ app.use("/suppliers", supplierRouter);
 app.use("/users", userRouter); // ✅ Add user-related routes
 app.use("/sales-associates", salesAssociateRouter);
 app.use("/store-managers", storeManagerRouter); // ✅ Add store manager routes
+app.use("/orders/completed-items", completedOrdersRouter); // ✅ Add completed orders route
 app.use("/orders", orderRouter); // ✅ Add order-related routes
 app.use("/jewellery-items", jewelleryItemsRouter); // ✅ Add jewellery items routes
 app.use("/sales", salesRouter); // ✅ Add sales routes
@@ -109,6 +112,7 @@ app.use("/maintenance", fixPaymentStatusRouter); // ✅ Add maintenance routes
 app.use("/maintenance", fixMissingAdvancePaymentsRouter); // ✅ Add fix missing advance payments routes
 app.use("/maintenance", fixAllAdvancePaymentsRouter); // ✅ Add fix all advance payments routes
 app.use("/maintenance", fixPaymentStatusDirectlyRouter); // ✅ Add fix payment status directly routes
+app.use("/maintenance/fix-total-amount", fixCustomOrderTotalAmountRouter); // ✅ Add fix custom order total amount routes
 app.use("/branches", branchesRouter); // ✅ Add branches routes
 app.use("/assay-reports", assayReportRouter); // ✅ Add assay report routes
 app.use("/gold-prices", goldPriceRouter); // ✅ Add gold price routes

@@ -49,7 +49,10 @@ export default function LowStockReportPage() {
   const chartRef = useRef<HTMLDivElement>(null);
 
   // Format currency
-  const formatCurrency = (amount: number) => {
+  const formatCurrency = (amount: number | null | undefined) => {
+    if (amount === null || amount === undefined) {
+      return 'LKR 0.00';
+    }
     return `LKR ${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
@@ -88,10 +91,24 @@ export default function LowStockReportPage() {
   const handleExportCSV = async () => {
     try {
       setIsExporting(true);
+
+      // Get filtered items based on current filters
+      const filteredItems = getFilteredItems();
+
+      // Create params object with branch filter
       const params: any = {};
       if (selectedBranch) {
         params.branchId = selectedBranch;
       }
+
+      // If category filter is active, pass the filtered data directly
+      if (categoryFilter) {
+        // Store filtered data in window object for CSV generation
+        (window as any).filteredLowStockData = filteredItems;
+        params.useFilteredData = true;
+        params.categoryFilter = categoryFilter;
+      }
+
       await exportReportCSV('low-stock', params);
     } catch (err) {
       console.error('Error exporting CSV:', err);
@@ -105,10 +122,24 @@ export default function LowStockReportPage() {
   const handleExportPDF = async () => {
     try {
       setIsExporting(true);
+
+      // Get filtered items based on current filters
+      const filteredItems = getFilteredItems();
+
+      // Create params object with branch filter
       const params: any = {};
       if (selectedBranch) {
         params.branchId = selectedBranch;
       }
+
+      // If category filter is active, pass the filtered data directly
+      if (categoryFilter) {
+        // Store filtered data in window object for PDF generation
+        (window as any).filteredLowStockData = filteredItems;
+        params.useFilteredData = true;
+        params.categoryFilter = categoryFilter;
+      }
+
       await exportReportPDF('low-stock', params, chartRef);
     } catch (err) {
       console.error('Error exporting PDF:', err);
@@ -126,8 +157,13 @@ export default function LowStockReportPage() {
   // Get unique categories for filtering
   const getUniqueCategories = () => {
     if (!lowStockData?.items) return [];
-    const categories = new Set(lowStockData.items.map(item => item.category));
-    return Array.from(categories);
+    // Filter out null or undefined categories and create a set of unique categories
+    const categories = new Set(
+      lowStockData.items
+        .filter(item => item.category) // Filter out items with no category
+        .map(item => item.category)
+    );
+    return Array.from(categories).sort(); // Sort alphabetically
   };
 
   // Prepare chart data for category breakdown
@@ -160,11 +196,14 @@ export default function LowStockReportPage() {
     if (!lowStockData?.items) return [];
 
     return lowStockData.items.filter(item => {
+      // Check if the item name or category matches the search term
       const matchesSearch = searchTerm === '' ||
-        item.item_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.category.toLowerCase().includes(searchTerm.toLowerCase());
+        (item.item_name && item.item_name.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (item.category && item.category.toLowerCase().includes(searchTerm.toLowerCase()));
 
-      const matchesCategory = categoryFilter === null || item.category === categoryFilter;
+      // Check if the item category matches the selected category filter
+      const matchesCategory = !categoryFilter ||
+        (item.category && item.category.toLowerCase() === categoryFilter.toLowerCase());
 
       return matchesSearch && matchesCategory;
     });
@@ -287,7 +326,10 @@ export default function LowStockReportPage() {
               id="category-filter"
               className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-yellow-500 focus:border-yellow-500 sm:text-sm rounded-md"
               value={categoryFilter || ''}
-              onChange={(e) => setCategoryFilter(e.target.value || null)}
+              onChange={(e) => {
+                const value = e.target.value;
+                setCategoryFilter(value === '' ? null : value);
+              }}
             >
               <option value="">All Categories</option>
               {getUniqueCategories().map((category) => (

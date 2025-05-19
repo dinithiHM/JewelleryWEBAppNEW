@@ -60,7 +60,7 @@ const OrderPaymentPage = () => {
   const [minAdvancePayment, setMinAdvancePayment] = useState(0); // 25% of total
   const [paymentMethod, setPaymentMethod] = useState('Cash');
   const [paymentNotes, setPaymentNotes] = useState('');
-  const [imagePreview] = useState<string | null>(designImageUrlFromQuery || null);
+  const [imagePreview] = useState<string>(designImageUrlFromQuery || '');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [submitError, setSubmitError] = useState('');
@@ -90,109 +90,135 @@ const OrderPaymentPage = () => {
   const [customEstimatePrice, setCustomEstimatePrice] = useState(estimatedPriceFromQuery ? parseFloat(estimatedPriceFromQuery) : 0);
   const [useCustomEstimate, setUseCustomEstimate] = useState(true); // Default to using custom estimate
 
-  // Fetch existing payments for this order
+  // State for order items
+  const [orderItems, setOrderItems] = useState<any[]>([]);
+  const [isLoadingItems, setIsLoadingItems] = useState(false);
+  const [activeTab, setActiveTab] = useState(0); // Track active tab index
+
+  // Fetch order items and existing payments for this order
   useEffect(() => {
     if (orderId) {
-      const fetchExistingPayments = async () => {
+      const fetchOrderData = async () => {
         try {
+          setIsLoadingItems(true);
+
+          // Fetch order items
+          console.log('Fetching order items for order:', orderId);
+          const itemsResponse = await fetch(`http://localhost:3002/orders/${orderId}`);
+          if (itemsResponse.ok) {
+            const orderData = await itemsResponse.json();
+            console.log('Order data:', orderData);
+            console.log('Order items:', orderData.items);
+
+            if (orderData.items && orderData.items.length > 0) {
+              console.log(`Found ${orderData.items.length} items for order ${orderId}`);
+
+              // Log each item's details
+              orderData.items.forEach((item: any, index: number) => {
+                console.log(`Item ${index + 1}:`, {
+                  category: item.category,
+                  quantity: item.quantity,
+                  estimated_price: item.estimated_price,
+                  weight_in_grams: item.weight_in_grams,
+                  gold_price_per_gram: item.gold_price_per_gram,
+                  selectedKarat: item.selectedKarat
+                });
+              });
+
+              setOrderItems(orderData.items);
+
+              // Calculate correct total amount based on individual items
+              let calculatedTotal = 0;
+              orderData.items.forEach((item: any) => {
+                const itemPrice = parseFloat(item.estimated_price || 0);
+                const itemQuantity = parseInt(item.quantity || 1);
+                const itemSubtotal = itemPrice * itemQuantity;
+                calculatedTotal += itemSubtotal;
+                console.log(`Item subtotal: ${itemPrice} × ${itemQuantity} = ${itemSubtotal}`);
+              });
+
+              console.log('Calculated total from items:', calculatedTotal);
+              if (calculatedTotal > 0) {
+                setTotalAmount(calculatedTotal);
+              }
+            } else {
+              console.log('No items found for order', orderId);
+            }
+          }
+
           // First try to use the advance payment from the query parameter
           if (advancePaymentFromQuery) {
             const advanceAmount = parseFloat(advancePaymentFromQuery);
             console.log('Using advance payment from query:', advanceAmount);
             setExistingAdvancePayment(advanceAmount);
-            return;
-          }
+          } else {
+            // If not available in query, fetch from API
+            console.log('Fetching payments for order:', orderId);
+            const response = await fetch(`http://localhost:3002/supplier-payments/order/${orderId}`);
+            if (response.ok) {
+              const result = await response.json();
+              console.log('Payment data:', result);
 
-          // If not available in query, fetch from API
-          console.log('Fetching payments for order:', orderId);
-          const response = await fetch(`http://localhost:3002/supplier-payments/order/${orderId}`);
-          if (response.ok) {
-            const result = await response.json();
-            console.log('Payment data:', result);
-
-            if (result.success && result.summary) {
-              // Use the summary data which includes the total paid amount
-              const totalPaid = parseFloat(result.summary.total_paid || 0);
-              console.log('Total paid from summary:', totalPaid);
-              setExistingAdvancePayment(totalPaid);
-            } else if (result.success && result.data) {
-              // Calculate total from individual payments
-              let totalPaid = 0;
-              if (result.data && result.data.length > 0) {
-                totalPaid = result.data.reduce((sum: number, payment: any) => sum + parseFloat(payment.amount_paid), 0);
+              if (result.success && result.summary) {
+                // Use the summary data which includes the total paid amount
+                const totalPaid = parseFloat(result.summary.total_paid || 0);
+                console.log('Total paid from summary:', totalPaid);
+                setExistingAdvancePayment(totalPaid);
+              } else if (result.success && result.data) {
+                // Calculate total from individual payments
+                let totalPaid = 0;
+                if (result.data && result.data.length > 0) {
+                  totalPaid = result.data.reduce((sum: number, payment: any) => sum + parseFloat(payment.amount_paid), 0);
+                }
+                console.log('Calculated total paid:', totalPaid);
+                setExistingAdvancePayment(totalPaid);
               }
-              console.log('Calculated total paid:', totalPaid);
-              setExistingAdvancePayment(totalPaid);
             }
           }
         } catch (error) {
-          console.error('Error fetching existing payments:', error);
+          console.error('Error fetching order data:', error);
+        } finally {
+          setIsLoadingItems(false);
         }
       };
 
-      fetchExistingPayments();
+      fetchOrderData();
     }
   }, [orderId, advancePaymentFromQuery]);
 
-  // Calculate total amount and minimum advance payment when making charges change
+  // Calculate minimum advance payment and total advance payment
   useEffect(() => {
-    if (useCustomEstimate) {
-      // Use the custom estimate price directly
-      // Recalculate total amount based on custom estimate
-      const newTotalAmount = customEstimatePrice * quantity;
-      setTotalAmount(newTotalAmount);
+    // We don't recalculate the total amount here anymore
+    // It's calculated from the order items when they're fetched
 
-      // Calculate remaining balance
-      const remainingBalance = Math.max(0, newTotalAmount - existingAdvancePayment);
+    // Calculate remaining balance
+    const remainingBalance = Math.max(0, totalAmount - existingAdvancePayment);
 
-      // Calculate minimum advance payment (25% of remaining balance)
-      // If this is the first payment (existingAdvancePayment === 0), then use 25% of total
-      // Otherwise, use 25% of remaining balance
-      const minPayment = existingAdvancePayment === 0
-        ? newTotalAmount * 0.25  // First payment: 25% of total
-        : remainingBalance * 0.25; // Subsequent payments: 25% of remaining
+    // Calculate minimum advance payment (25% of remaining balance)
+    // If this is the first payment (existingAdvancePayment === 0), then use 25% of total
+    // Otherwise, use 25% of remaining balance
+    const minPayment = existingAdvancePayment === 0
+      ? totalAmount * 0.25  // First payment: 25% of total
+      : remainingBalance * 0.25; // Subsequent payments: 25% of remaining
 
-      setMinAdvancePayment(minPayment);
+    setMinAdvancePayment(minPayment);
 
-      // Calculate total advance payment (existing + current)
-      const newTotalAdvancePayment = existingAdvancePayment + currentPaymentAmount;
-      setTotalAdvancePayment(newTotalAdvancePayment);
+    // Calculate total advance payment (existing + current)
+    const newTotalAdvancePayment = existingAdvancePayment + currentPaymentAmount;
+    setTotalAdvancePayment(newTotalAdvancePayment);
 
-      // We no longer auto-adjust the payment amount to the minimum
-      // This allows users to enter any amount, even below the minimum
-      // The validation will happen at form submission time
-    } else {
-      // Calculate based on components (gold + making + additional)
-      // Recalculate estimated price based on making charges
-      const newEstimatedPrice = baseEstimatedPrice + makingCharges + additionalMaterialsCharges;
-      setEstimatedPrice(newEstimatedPrice);
+    // We no longer auto-adjust the payment amount to the minimum
+    // This allows users to enter any amount, even below the minimum
+    // The validation will happen at form submission time
 
-      // Recalculate total amount
-      const newTotalAmount = newEstimatedPrice * quantity;
-      setTotalAmount(newTotalAmount);
-
-      // Calculate remaining balance
-      const remainingBalance = Math.max(0, newTotalAmount - existingAdvancePayment);
-
-      // Calculate minimum advance payment (25% of remaining balance)
-      // If this is the first payment (existingAdvancePayment === 0), then use 25% of total
-      // Otherwise, use 25% of remaining balance
-      const minPayment = existingAdvancePayment === 0
-        ? newTotalAmount * 0.25  // First payment: 25% of total
-        : remainingBalance * 0.25; // Subsequent payments: 25% of remaining
-
-      setMinAdvancePayment(minPayment);
-
-      // Calculate total advance payment (existing + current)
-      const newTotalAdvancePayment = existingAdvancePayment + currentPaymentAmount;
-      setTotalAdvancePayment(newTotalAdvancePayment);
-
-      // We no longer auto-adjust the payment amount to the minimum
-      // This allows users to enter any amount, even below the minimum
-      // The validation will happen at form submission time
-    }
-  }, [makingCharges, baseEstimatedPrice, additionalMaterialsCharges, quantity, currentPaymentAmount,
-      customEstimatePrice, useCustomEstimate, existingAdvancePayment]);
+    console.log('Payment calculations updated:');
+    console.log(`- Total amount: ${totalAmount}`);
+    console.log(`- Existing advance: ${existingAdvancePayment}`);
+    console.log(`- Remaining balance: ${remainingBalance}`);
+    console.log(`- Minimum payment (25%): ${minPayment}`);
+    console.log(`- Current payment: ${currentPaymentAmount}`);
+    console.log(`- Total advance after payment: ${newTotalAdvancePayment}`);
+  }, [totalAmount, currentPaymentAmount, existingAdvancePayment]);
 
   // Handle form submission
   const handleSubmit = async (e: React.FormEvent) => {
@@ -328,15 +354,59 @@ const OrderPaymentPage = () => {
                 <p className="font-medium">{supplierName}</p>
               </div>
 
-              <div>
-                <p className="text-sm text-gray-500">Quantity</p>
-                <p className="font-medium">{quantity}</p>
-              </div>
+              {orderItems && orderItems.length > 0 ? (
+                <div className="md:col-span-2 mt-2">
+                  <p className="text-sm text-gray-500 mb-2">Order Summary</p>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full bg-white border border-gray-200 text-sm">
+                      <thead className="bg-gray-100">
+                        <tr>
+                          <th className="py-2 px-3 text-left border-b">Item</th>
+                          <th className="py-2 px-3 text-left border-b">Karat</th>
+                          <th className="py-2 px-3 text-right border-b">Weight (g)</th>
+                          <th className="py-2 px-3 text-right border-b">Quantity</th>
+                          <th className="py-2 px-3 text-right border-b">Price/Unit</th>
+                          <th className="py-2 px-3 text-right border-b">Subtotal</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {orderItems.map((item, index) => {
+                          const itemPrice = parseFloat(item.estimated_price || 0);
+                          const itemQuantity = parseInt(item.quantity || 1);
+                          const itemSubtotal = itemPrice * itemQuantity;
 
-              <div>
-                <p className="text-sm text-gray-500">Gold Karat</p>
-                <p className="font-medium">{selectedKarat}</p>
-              </div>
+                          return (
+                            <tr key={index} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                              <td className="py-2 px-3 border-b">{item.category || `Item ${index + 1}`}</td>
+                              <td className="py-2 px-3 border-b">{item.selectedKarat || 'N/A'}</td>
+                              <td className="py-2 px-3 text-right border-b">{parseFloat(item.weight_in_grams || 0).toFixed(2)}</td>
+                              <td className="py-2 px-3 text-right border-b">{itemQuantity}</td>
+                              <td className="py-2 px-3 text-right border-b">Rs. {itemPrice.toFixed(2).toLocaleString()}</td>
+                              <td className="py-2 px-3 text-right border-b font-medium">Rs. {itemSubtotal.toFixed(2).toLocaleString()}</td>
+                            </tr>
+                          );
+                        })}
+                        <tr className="bg-gray-100 font-semibold">
+                          <td colSpan={5} className="py-2 px-3 text-right border-b">Total Order Amount:</td>
+                          <td className="py-2 px-3 text-right border-b text-yellow-700">Rs. {totalAmount.toFixed(2).toLocaleString()}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <p className="text-sm text-gray-500">Quantity</p>
+                    <p className="font-medium">{quantity}</p>
+                  </div>
+
+                  <div>
+                    <p className="text-sm text-gray-500">Gold Karat</p>
+                    <p className="font-medium">{selectedKarat}</p>
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
@@ -344,70 +414,99 @@ const OrderPaymentPage = () => {
           <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
             <h3 className="text-lg font-semibold mb-4">Price Calculation</h3>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-              {/* Gold Price Per Gram (Locked) */}
-              <div>
-                <label className="block text-sm font-medium mb-1">Gold Price (Rs./g)</label>
-                <input
-                  type="text"
-                  className="w-full p-2 border border-gray-300 rounded-md bg-gray-100"
-                  value={goldPricePerGram.toFixed(2)}
-                  disabled
-                />
+            {orderItems && orderItems.length > 0 ? (
+              <div className="mb-4">
+                <h4 className="text-md font-medium mb-2">Order Summary</h4>
+                <div className="p-4 bg-white border border-gray-200 rounded-md">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-sm text-gray-500">Total Items</p>
+                      <p className="font-medium">{orderItems.length}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-500">Total Quantity</p>
+                      <p className="font-medium">
+                        {orderItems.reduce((sum, item) => sum + parseInt(item.quantity || 1), 0)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-500">Total Gold Weight</p>
+                      <p className="font-medium">
+                        {orderItems.reduce((sum, item) => {
+                          const weight = parseFloat(item.weight_in_grams || 0);
+                          const quantity = parseInt(item.quantity || 1);
+                          return sum + (weight * quantity);
+                        }, 0).toFixed(2)} g
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-500">Average Gold Price</p>
+                      <p className="font-medium">
+                        Rs. {orderItems.reduce((sum, item) => sum + parseFloat(item.gold_price_per_gram || 0), 0) / orderItems.length > 0 ?
+                          (orderItems.reduce((sum, item) => sum + parseFloat(item.gold_price_per_gram || 0), 0) / orderItems.length).toFixed(2) :
+                          '0.00'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
               </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                {/* Gold Price Per Gram (Locked) */}
+                <div>
+                  <label className="block text-sm font-medium mb-1">Gold Price (Rs./g)</label>
+                  <input
+                    type="text"
+                    className="w-full p-2 border border-gray-300 rounded-md bg-gray-100"
+                    value={goldPricePerGram.toFixed(2)}
+                    disabled
+                  />
+                </div>
 
-              {/* Weight in Grams (Locked) */}
-              <div>
-                <label className="block text-sm font-medium mb-1">Weight (g)</label>
-                <input
-                  type="text"
-                  className="w-full p-2 border border-gray-300 rounded-md bg-gray-100"
-                  value={weightInGrams.toFixed(3)}
-                  disabled
-                />
-              </div>
+                {/* Weight in Grams (Locked) */}
+                <div>
+                  <label className="block text-sm font-medium mb-1">Weight (g)</label>
+                  <input
+                    type="text"
+                    className="w-full p-2 border border-gray-300 rounded-md bg-gray-100"
+                    value={weightInGrams.toFixed(3)}
+                    disabled
+                  />
+                </div>
 
-              {/* Making Charges (Editable) */}
-              <div>
-                <label className="block text-sm font-medium mb-1">Making Charges (Rs.)</label>
-                <input
-                  type="number"
-                  className="w-full p-2 border border-gray-300 rounded-md"
-                  value={makingCharges}
-                  onChange={(e) => {
-                    const newValue = e.target.value === '' ? 0 : parseFloat(e.target.value);
-                    if (!isNaN(newValue)) {
-                      setMakingCharges(newValue);
-                    }
-                  }}
-                  min="0"
-                  step="any"
-                />
-              </div>
+                {/* Making Charges (Editable) */}
+                <div>
+                  <label className="block text-sm font-medium mb-1">Making Charges (Rs.)</label>
+                  <input
+                    type="number"
+                    className="w-full p-2 border border-gray-300 rounded-md"
+                    value={makingCharges}
+                    onChange={(e) => {
+                      const newValue = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                      if (!isNaN(newValue)) {
+                        setMakingCharges(newValue);
+                      }
+                    }}
+                    min="0"
+                    step="any"
+                  />
+                </div>
 
-              {/* Additional Materials Charges (Locked) */}
-              <div>
-                <label className="block text-sm font-medium mb-1">Additional Materials Charges (Rs.)</label>
-                <input
-                  type="text"
-                  className="w-full p-2 border border-gray-300 rounded-md bg-gray-100"
-                  value={additionalMaterialsCharges.toFixed(2)}
-                  disabled
-                />
+                {/* Additional Materials Charges (Locked) */}
+                <div>
+                  <label className="block text-sm font-medium mb-1">Additional Materials Charges (Rs.)</label>
+                  <input
+                    type="text"
+                    className="w-full p-2 border border-gray-300 rounded-md bg-gray-100"
+                    value={additionalMaterialsCharges.toFixed(2)}
+                    disabled
+                  />
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Calculated Prices */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 pt-4 border-t border-gray-200">
-              {/* Base Estimate (Gold * Weight) */}
-              <div>
-                <label className="block text-sm font-medium mb-1">Base Gold Price (per unit)</label>
-                <div className="p-2 bg-white border border-gray-300 rounded-md">
-                  Rs. {baseEstimatedPrice.toFixed(2).toLocaleString()}
-                  <span className="text-xs text-gray-500 block">Gold price × weight</span>
-                </div>
-              </div>
-
               {/* Custom Estimate Price Toggle */}
               <div className="md:col-span-2 mb-2">
                 <div className="flex items-center">
@@ -427,79 +526,150 @@ const OrderPaymentPage = () => {
                 </p>
               </div>
 
-              {/* Custom Estimate Price (editable if useCustomEstimate is true) */}
-              {useCustomEstimate && (
-                <div className="md:col-span-2 mb-4">
-                  <label className="block text-sm font-medium mb-1">Custom Estimate Price (per unit)</label>
-                  <input
-                    type="number"
-                    className="w-full p-2 border border-gray-300 rounded-md"
-                    value={customEstimatePrice}
-                    onChange={(e) => {
-                      const newValue = e.target.value === '' ? 0 : parseFloat(e.target.value);
-                      if (!isNaN(newValue)) {
-                        setCustomEstimatePrice(newValue);
-                      }
-                    }}
-                    min="0"
-                    step="any"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">
-                    This is the final price per unit including all charges and profit margin.
-                  </p>
-                </div>
-              )}
-
-              {/* Calculated Estimate Price (shown if useCustomEstimate is false) */}
-              {!useCustomEstimate && (
-                <div>
-                  <label className="block text-sm font-medium mb-1">Calculated Estimate Price (per unit)</label>
-                  <div className="p-2 bg-white border border-gray-300 rounded-md">
-                    Rs. {estimatedPrice.toFixed(2).toLocaleString()}
-                    <span className="text-xs text-gray-500 block">Gold + making + additional materials</span>
-                  </div>
-                </div>
-              )}
-
-              {/* Breakdown of Charges (always shown) */}
-              <div className="md:col-span-2">
-                <label className="block text-sm font-medium mb-1">Price Breakdown</label>
-                <div className="p-2 bg-gray-50 border border-gray-200 rounded-md text-sm">
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>Gold Cost: Rs. {baseEstimatedPrice.toFixed(2).toLocaleString()}</div>
-                    <div>Making Charges: Rs. {makingCharges.toFixed(2).toLocaleString()}</div>
-                    <div>Additional Materials: Rs. {additionalMaterialsCharges.toFixed(2).toLocaleString()}</div>
-                    <div className="font-semibold">Calculated Total: Rs. {estimatedPrice.toFixed(2).toLocaleString()}</div>
-                    {useCustomEstimate && (
-                      <div className="font-semibold text-green-600 md:col-span-2">
-                        Custom Price: Rs. {customEstimatePrice.toFixed(2).toLocaleString()}
-                        {customEstimatePrice > estimatedPrice ? (
-                          <span className="text-xs text-green-600 ml-2">
-                            (+{((customEstimatePrice - estimatedPrice) / estimatedPrice * 100).toFixed(1)}% profit margin)
-                          </span>
-                        ) : customEstimatePrice < estimatedPrice ? (
-                          <span className="text-xs text-red-600 ml-2">
-                            ({((estimatedPrice - customEstimatePrice) / estimatedPrice * 100).toFixed(1)}% below cost!)
-                          </span>
-                        ) : null}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Total Amount */}
+              {/* Total Order Amount (always shown) */}
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium mb-1">Total Order Amount</label>
-                <div className="p-2 bg-white border border-gray-300 rounded-md font-semibold text-yellow-700">
-                  Rs. {totalAmount.toFixed(2).toLocaleString()}
-                  <span className="text-xs text-gray-500 block">
-                    {quantity} {quantity === 1 ? 'unit' : 'units'} × Rs. {estimatedPrice.toFixed(2).toLocaleString()}
-                  </span>
+                <div className="p-3 bg-white border border-gray-300 rounded-md">
+                  <div className="flex justify-between items-center">
+                    <span className="font-medium">Total:</span>
+                    <span className="font-bold text-yellow-700 text-lg">Rs. {totalAmount.toFixed(2).toLocaleString()}</span>
+                  </div>
+                  {orderItems && orderItems.length > 0 && (
+                    <div className="text-xs text-gray-500 mt-1">
+                      Total for {orderItems.length} {orderItems.length === 1 ? 'item' : 'items'} with a total quantity of {
+                        orderItems.reduce((sum, item) => sum + parseInt(item.quantity || 1), 0)
+                      } pieces
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
           </div>
+
+              {/* Item Details (Collapsible) */}
+              {orderItems && orderItems.length > 0 && (
+                <div className="md:col-span-2 mb-4">
+                  <details className="bg-white border border-gray-200 rounded-md">
+                    <summary className="p-3 font-medium cursor-pointer hover:bg-gray-50">
+                      View Detailed Item Breakdown
+                    </summary>
+                    <div className="p-4 border-t border-gray-200">
+                      {/* Tabs Navigation */}
+                      <div className="flex border-b border-gray-200 mb-4 overflow-x-auto">
+                        {orderItems.map((item, index) => (
+                          <button
+                            key={index}
+                            className={`px-4 py-2 text-sm font-medium ${
+                              activeTab === index
+                                ? 'border-b-2 border-blue-500 text-blue-600'
+                                : 'text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                            }`}
+                            onClick={() => setActiveTab(index)}
+                          >
+                            {item.category || `Item ${index + 1}`}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Tab Content */}
+                      {orderItems.map((item, index) => {
+                        const itemPrice = parseFloat(item.estimated_price || 0);
+                        const itemQuantity = parseInt(item.quantity || 1);
+                        const itemSubtotal = itemPrice * itemQuantity;
+                        const baseEstimatedPrice = parseFloat(item.base_estimated_price || 0);
+                        const makingCharges = parseFloat(item.making_charges || 0);
+                        const additionalMaterialsCharges = parseFloat(item.additional_materials_charges || 0);
+                        const offeredGoldValue = parseFloat(item.offered_gold_value || 0);
+
+                        return (
+                          <div
+                            key={index}
+                            className={`bg-white border border-gray-200 rounded-md p-4 ${activeTab === index ? 'block' : 'hidden'}`}
+                          >
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                              <div>
+                                <h3 className="font-medium text-gray-900">{item.category || `Item ${index + 1}`}</h3>
+                                <p className="text-sm text-gray-500">Order Item #{index + 1}</p>
+                              </div>
+
+                              {item.design_image_url && (
+                                <div className="flex justify-end">
+                                  <div className="relative h-20 w-20 border border-gray-200 rounded-md overflow-hidden">
+                                    <img
+                                      src={item.design_image_url}
+                                      alt={`Design for ${item.category || `Item ${index + 1}`}`}
+                                      className="object-cover w-full h-full"
+                                    />
+                                  </div>
+                                </div>
+                              )}
+
+                              <div className="md:col-span-2">
+                                <div className="grid grid-cols-2 gap-4 text-sm">
+                                  <div>
+                                    <span className="block text-gray-500">Quantity</span>
+                                    <span className="font-medium">{itemQuantity}</span>
+                                  </div>
+                                  <div>
+                                    <span className="block text-gray-500">Gold Karat</span>
+                                    <span className="font-medium">{item.selectedKarat || 'N/A'}</span>
+                                  </div>
+                                  <div>
+                                    <span className="block text-gray-500">Weight (g)</span>
+                                    <span className="font-medium">{parseFloat(item.weight_in_grams || 0).toFixed(2)}</span>
+                                  </div>
+                                  <div>
+                                    <span className="block text-gray-500">Gold Price (Rs./g)</span>
+                                    <span className="font-medium">{parseFloat(item.gold_price_per_gram || 0).toFixed(2)}</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="md:col-span-2 mt-2">
+                                <h4 className="font-medium text-gray-900 mb-2">Price Breakdown</h4>
+                                <div className="bg-gray-50 p-3 rounded-md">
+                                  <div className="grid grid-cols-2 gap-2 text-sm">
+                                    <div>
+                                      <span className="text-gray-500">Base Gold Price:</span>
+                                      <span className="float-right font-medium">Rs. {baseEstimatedPrice.toFixed(2).toLocaleString()}</span>
+                                    </div>
+                                    <div>
+                                      <span className="text-gray-500">Making Charges:</span>
+                                      <span className="float-right font-medium">Rs. {makingCharges.toFixed(2).toLocaleString()}</span>
+                                    </div>
+                                    <div>
+                                      <span className="text-gray-500">Additional Materials:</span>
+                                      <span className="float-right font-medium">Rs. {additionalMaterialsCharges.toFixed(2).toLocaleString()}</span>
+                                    </div>
+                                    {offeredGoldValue > 0 && (
+                                      <div>
+                                        <span className="text-gray-500">Offered Gold Value:</span>
+                                        <span className="float-right font-medium text-red-600">- Rs. {offeredGoldValue.toFixed(2).toLocaleString()}</span>
+                                      </div>
+                                    )}
+                                    <div className="col-span-2 border-t border-gray-200 pt-2 mt-1">
+                                      <span className="text-gray-700 font-medium">Price Per Unit:</span>
+                                      <span className="float-right font-medium">Rs. {itemPrice.toFixed(2).toLocaleString()}</span>
+                                    </div>
+                                    <div className="col-span-2">
+                                      <span className="text-gray-700 font-medium">Quantity:</span>
+                                      <span className="float-right font-medium">× {itemQuantity}</span>
+                                    </div>
+                                    <div className="col-span-2 border-t border-gray-200 pt-2 mt-1">
+                                      <span className="text-gray-700 font-medium">Subtotal:</span>
+                                      <span className="float-right font-medium text-yellow-700">Rs. {itemSubtotal.toFixed(2).toLocaleString()}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </details>
+                </div>
+              )}
 
           {/* Supplier Payment Section */}
           <div id="supplier-payment-section" className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
@@ -655,7 +825,8 @@ const OrderPaymentPage = () => {
                   <Image
                     src={imagePreview}
                     alt="Design Preview"
-                    fill
+                    width={256}
+                    height={256}
                     style={{ objectFit: 'contain' }}
                   />
                 </div>

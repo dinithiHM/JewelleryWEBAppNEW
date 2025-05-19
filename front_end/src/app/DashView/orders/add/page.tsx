@@ -17,6 +17,7 @@ const AddOrderPage = () => {
   const offerGoldFromQuery = searchParams.get('offer_gold');
   const selectedKaratsFromQuery = searchParams.get('selected_karats');
   const karatValuesFromQuery = searchParams.get('karat_values');
+  const totalSupplierAmountFromQuery = searchParams.get('total_supplier_amount');
 
   // Gold and pricing details
   const goldPricePerGramFromQuery = searchParams.get('gold_price_per_gram');
@@ -118,7 +119,21 @@ const AddOrderPage = () => {
     // Set branch ID
     const numericBranchId = branchId ? Number(branchId) : null;
     setUserBranchId(numericBranchId);
-  }, []);
+
+    // Handle query parameters for "Add More" functionality
+    if (categoryFromQuery) {
+      setCategory(categoryFromQuery);
+      console.log('Setting category from query parameter:', categoryFromQuery);
+    }
+
+    if (supplierIdFromQuery) {
+      setSupplier(supplierIdFromQuery);
+      console.log('Setting supplier from query parameter:', supplierIdFromQuery);
+    }
+
+    // Clear the addMoreOrder flag if it exists
+    localStorage.removeItem('addMoreOrder');
+  }, [categoryFromQuery, supplierIdFromQuery]);
 
   // Fetch categories from the database
   useEffect(() => {
@@ -608,6 +623,31 @@ const AddOrderPage = () => {
         }
       }
 
+      // Check if we're adding to an existing order
+      const existingOrderId = orderIdFromQuery || localStorage.getItem('current_order_id');
+
+      // Prepare the current item data
+      const itemData = {
+        category,
+        quantity,
+        offerGold: offerGold === 'yes' ? 1 : 0,
+        selectedKarats: Object.keys(selectedKarats).filter(k => selectedKarats[k]),
+        karatValues: Object.fromEntries(
+          Object.entries(karatValues).filter(([k]) => selectedKarats[k])
+        ),
+        image: imagePreview,
+        goldPricePerGram,
+        selectedKarat, // Include the selected karat from price calculator
+        goldPurity: karatPurityMap[selectedKarat].purity, // Include the purity percentage
+        weightInGrams,
+        makingCharges,
+        additionalMaterialsCharges,
+        baseEstimatedPrice: estimatedPrice, // Base estimate (gold * weight)
+        offeredGoldValue: offerGold === 'yes' ? offeredGoldValue : 0, // Value of offered gold material
+        estimatedPrice: useCustomPrice ? customPrice : totalEstimatedPrice, // Total estimate with all charges
+        totalAmount
+      };
+
       // Prepare the data to be sent
       const orderData = {
         category,
@@ -618,7 +658,7 @@ const AddOrderPage = () => {
         karatValues: Object.fromEntries(
           Object.entries(karatValues).filter(([k]) => selectedKarats[k])
         ),
-        image: imagePreview,
+        // Don't include image at the order level, only at the item level
         branch_id: userBranchId, // Include branch_id from user info
         goldPricePerGram,
         selectedKarat, // Include the selected karat from price calculator
@@ -654,7 +694,11 @@ const AddOrderPage = () => {
                 purity: k,
                 quantity: quantity
               };
-            }) : []
+            }) : [],
+        // If we have an existing order ID, include it
+        existing_order_id: existingOrderId,
+        // Include the current item as the first item
+        items: [itemData]
       };
 
       console.log('Including branch_id:', userBranchId);
@@ -675,8 +719,11 @@ const AddOrderPage = () => {
         throw new Error(result.message || 'Failed to create order');
       }
 
-      // If order was created successfully, create the supplier payment record
+      // Store the order ID for potential future items
       if (result.success && result.orderId) {
+        localStorage.setItem('current_order_id', result.orderId.toString());
+
+        // If order was created successfully, create the supplier payment record
         try {
           const paymentData = {
             order_id: result.orderId,
@@ -750,40 +797,78 @@ const AddOrderPage = () => {
         console.error('Error creating inventory order notification:', notificationError);
       }
 
-      alert('Order submitted successfully!');
+      // Check if we need to add more orders
+      const addMoreOrder = localStorage.getItem('addMoreOrder') === 'true';
 
-      // Reset form fields
-      setCategory('');
-      setSupplier('');
-      setQuantity(20);
-      setOfferGold('yes');
+      // Get the current total for this supplier (if any)
+      let supplierTotalAmount = parseFloat(localStorage.getItem(`supplier_total_${supplier}`) || '0');
 
-      // Reset karat selections based on available stock
-      const newSelectedKarats: Record<string, boolean> = {};
-      const newKaratValues: Record<string, number> = {};
+      // Add the current order amount to the supplier total
+      supplierTotalAmount += totalAmount;
 
-      goldStock.forEach(item => {
-        if (item.quantity_in_grams > 0) {
-          newSelectedKarats[item.purity] = false;
-          newKaratValues[item.purity] = 0;
-        }
-      });
+      // Save the updated total
+      localStorage.setItem(`supplier_total_${supplier}`, supplierTotalAmount.toString());
 
-      setSelectedKarats(newSelectedKarats);
-      setKaratValues(newKaratValues);
-      setImagePreview(null);
+      if (addMoreOrder) {
+        // Clear the flag
+        localStorage.removeItem('addMoreOrder');
 
-      // Reset price calculation fields
-      setShowPriceCalculation(false);
-      setGoldPricePerGram(0);
-      setWeightInGrams(0);
-      setMakingCharges(0);
-      setAdditionalMaterialsCharges(0);
-      setUseCustomPrice(false);
-      setCustomPrice(0);
-      setEstimatedPrice(0);
-      setTotalEstimatedPrice(0);
-      setTotalAmount(0);
+        // Show success message with total amount for this supplier
+        alert(`Order item submitted successfully! Total amount for this supplier: Rs. ${supplierTotalAmount.toFixed(2).toLocaleString()}\n\nRedirecting to add another item with the same supplier and category.`);
+
+        // Create query parameters for the next order
+        const queryParams = new URLSearchParams({
+          order_id: result.orderId.toString(),
+          supplier_id: supplier,
+          category: category,
+          total_supplier_amount: supplierTotalAmount.toString(),
+        }).toString();
+
+        // Redirect to the add order page with the query parameters
+        window.location.href = `/DashView/orders/add?${queryParams}`;
+      } else {
+        // Show regular success message with total amount for this supplier
+        alert(`Order submitted successfully! Total amount for this supplier: Rs. ${supplierTotalAmount.toFixed(2).toLocaleString()}`);
+
+        // Clear the current order ID since we're done with this order
+        localStorage.removeItem('current_order_id');
+
+        // Reset form fields
+        setCategory('');
+        setSupplier('');
+        setQuantity(20);
+        setOfferGold('yes');
+
+        // Clear the supplier total since we're done with this supplier
+        localStorage.removeItem(`supplier_total_${supplier}`);
+
+        // Reset karat selections based on available stock
+        const newSelectedKarats: Record<string, boolean> = {};
+        const newKaratValues: Record<string, number> = {};
+
+        goldStock.forEach(item => {
+          if (item.quantity_in_grams > 0) {
+            newSelectedKarats[item.purity] = false;
+            newKaratValues[item.purity] = 0;
+          }
+        });
+
+        setSelectedKarats(newSelectedKarats);
+        setKaratValues(newKaratValues);
+        setImagePreview(null);
+
+        // Reset price calculation fields
+        setShowPriceCalculation(false);
+        setGoldPricePerGram(0);
+        setWeightInGrams(0);
+        setMakingCharges(0);
+        setAdditionalMaterialsCharges(0);
+        setUseCustomPrice(false);
+        setCustomPrice(0);
+        setEstimatedPrice(0);
+        setTotalEstimatedPrice(0);
+        setTotalAmount(0);
+      }
 
     } catch (error) {
       console.error('Error submitting order:', error);
@@ -797,6 +882,56 @@ const AddOrderPage = () => {
     <div className="p-6 max-w-4xl mx-auto">
       <div className="bg-white rounded-lg shadow-md p-6 mb-8">
         <h2 className="text-2xl font-bold text-center mb-6">Add New Order</h2>
+
+        {/* Display total supplier amount if available */}
+        {(totalSupplierAmountFromQuery || supplierIdFromQuery || orderIdFromQuery) && (
+          <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
+            <div className="flex items-center justify-between">
+              <div>
+                {orderIdFromQuery && (
+                  <div className="mb-2">
+                    <span className="font-medium">Adding to existing Order #</span>
+                    <span className="font-bold text-yellow-700 ml-1">
+                      {orderIdFromQuery}
+                    </span>
+                  </div>
+                )}
+                <span className="font-medium">Previous orders total for this supplier: </span>
+                <span className="font-bold text-yellow-700">
+                  Rs. {parseFloat(totalSupplierAmountFromQuery || localStorage.getItem(`supplier_total_${supplierIdFromQuery}`) || '0').toFixed(2).toLocaleString()}
+                </span>
+              </div>
+              <div>
+                {orderIdFromQuery && (
+                  <button
+                    type="button"
+                    className="text-xs bg-blue-500 text-white px-2 py-1 rounded hover:bg-blue-600 mr-2"
+                    onClick={() => {
+                      localStorage.removeItem('current_order_id');
+                      alert('Starting a new order instead of adding to the existing one.');
+                      window.location.href = `/DashView/orders/add?supplier_id=${supplierIdFromQuery}&category=${categoryFromQuery}`;
+                    }}
+                  >
+                    Start New Order
+                  </button>
+                )}
+                {supplierIdFromQuery && (
+                  <button
+                    type="button"
+                    className="text-xs bg-yellow-500 text-white px-2 py-1 rounded hover:bg-yellow-600"
+                    onClick={() => {
+                      localStorage.removeItem(`supplier_total_${supplierIdFromQuery}`);
+                      alert('Supplier total has been reset.');
+                      window.location.reload();
+                    }}
+                  >
+                    Reset Total
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit}>
           {/* Item Category */}
@@ -1383,14 +1518,35 @@ const AddOrderPage = () => {
 
 
 
-          {/* Submit and Cancel Buttons */}
+          {/* Submit, Add More, and Cancel Buttons */}
           <div className="flex justify-between">
-            <button
-              type="submit"
-              className="bg-yellow-400 text-black px-8 py-2 rounded-full font-medium"
-            >
-              Submit
-            </button>
+            <div className="flex space-x-4">
+              <button
+                type="submit"
+                className="bg-yellow-400 text-black px-8 py-2 rounded-full font-medium"
+              >
+                Submit
+              </button>
+              <button
+                type="button"
+                className="bg-green-500 text-white px-8 py-2 rounded-full font-medium flex items-center"
+                onClick={(e) => {
+                  e.preventDefault();
+                  // Set a flag to indicate we want to add more after submission
+                  localStorage.setItem('addMoreOrder', 'true');
+                  // Submit the form
+                  const form = e.currentTarget.closest('form');
+                  if (form) {
+                    form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+                  }
+                }}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" />
+                </svg>
+                Add More
+              </button>
+            </div>
             <button
               type="button"
               className="bg-gray-200 text-black px-8 py-2 rounded-full font-medium"

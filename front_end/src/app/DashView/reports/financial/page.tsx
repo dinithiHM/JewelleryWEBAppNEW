@@ -3,17 +3,17 @@
 import React, { useState, useEffect } from 'react';
 import {
   TrendingUp,
-  DollarSign,
   Calendar,
   Download,
-  Filter,
   RefreshCw,
   CreditCard,
   Building,
   PieChart,
   BarChart2,
   LineChart,
-  Percent
+  Percent,
+  ShoppingBag,
+  Package
 } from 'lucide-react';
 import {
   Chart as ChartJS,
@@ -69,11 +69,20 @@ export default function FinancialReportPage() {
 
   // Format currency
   const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-LK', {
-      style: 'currency',
-      currency: 'LKR',
-      minimumFractionDigits: 2
-    }).format(amount);
+    // Check if amount is a valid number
+    if (amount === undefined || amount === null || isNaN(amount)) {
+      return 'LKR 0.00';
+    }
+
+    // Convert to number to ensure proper formatting
+    const numAmount = Number(amount);
+
+    // Format without currency symbol, then add LKR prefix
+    return 'LKR ' + new Intl.NumberFormat('en-LK', {
+      style: 'decimal',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(numAmount);
   };
 
   // Format date
@@ -95,7 +104,30 @@ export default function FinancialReportPage() {
       const params: any = { period };
       if (selectedBranchId) params.branchId = selectedBranchId;
 
+      console.log('Fetching financial report with params:', params);
       const response = await axios.get(`http://localhost:3002/api/reports/financial`, { params });
+      console.log('Financial report data received:', response.data);
+
+      // Ensure revenue values are numbers and calculate total manually
+      if (response.data.revenue) {
+        response.data.revenue.sales = Number(response.data.revenue.sales) || 0;
+        response.data.revenue.advancePayments = Number(response.data.revenue.advancePayments) || 0;
+        response.data.revenue.orders = Number(response.data.revenue.orders) || 0;
+
+        // Calculate total manually to ensure it's correct
+        response.data.revenue.total =
+          response.data.revenue.sales +
+          response.data.revenue.advancePayments +
+          response.data.revenue.orders;
+
+        console.log('Revenue components:', {
+          sales: response.data.revenue.sales,
+          advancePayments: response.data.revenue.advancePayments,
+          orders: response.data.revenue.orders,
+          calculatedTotal: response.data.revenue.total
+        });
+      }
+
       setReportData(response.data);
       setBranches(response.data.branches || []);
     } catch (err: any) {
@@ -323,19 +355,30 @@ export default function FinancialReportPage() {
             <div className="bg-white p-4 rounded-lg shadow-md">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-medium text-gray-500">Total Revenue</h3>
-                <DollarSign className="h-5 w-5 text-yellow-600" />
+                <TrendingUp className="h-5 w-5 text-yellow-600" />
               </div>
-              <p className="mt-2 text-2xl font-semibold text-gray-900">{formatCurrency(reportData.revenue.total)}</p>
-              <p className="mt-1 text-sm text-gray-600">{reportData.transactions.total} transactions</p>
+              <p className="mt-2 text-2xl font-semibold text-gray-900">
+                {(() => {
+                  const sales = Number(reportData.revenue?.sales) || 0;
+                  const advancePayments = Number(reportData.revenue?.advancePayments) || 0;
+                  const orders = Number(reportData.revenue?.orders) || 0;
+                  const total = sales + advancePayments + orders;
+
+                  console.log('Frontend revenue calculation:', { sales, advancePayments, orders, total });
+
+                  return formatCurrency(total);
+                })()}
+              </p>
+              <p className="mt-1 text-sm text-gray-600">{reportData.transactions?.total || 0} transactions</p>
             </div>
 
             <div className="bg-white p-4 rounded-lg shadow-md">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-medium text-gray-500">Sales Revenue</h3>
-                <CreditCard className="h-5 w-5 text-green-600" />
+                <ShoppingBag className="h-5 w-5 text-green-600" />
               </div>
-              <p className="mt-2 text-2xl font-semibold text-gray-900">{formatCurrency(reportData.revenue.sales)}</p>
-              <p className="mt-1 text-sm text-gray-600">{reportData.transactions.sales} sales</p>
+              <p className="mt-2 text-2xl font-semibold text-gray-900">{formatCurrency(Number(reportData.revenue?.sales) || 0)}</p>
+              <p className="mt-1 text-sm text-gray-600">{reportData.transactions?.sales || 0} sales</p>
             </div>
 
             <div className="bg-white p-4 rounded-lg shadow-md">
@@ -343,17 +386,17 @@ export default function FinancialReportPage() {
                 <h3 className="text-sm font-medium text-gray-500">Advance Payments</h3>
                 <CreditCard className="h-5 w-5 text-blue-600" />
               </div>
-              <p className="mt-2 text-2xl font-semibold text-gray-900">{formatCurrency(reportData.revenue.advancePayments)}</p>
-              <p className="mt-1 text-sm text-gray-600">{reportData.transactions.advancePayments} payments</p>
+              <p className="mt-2 text-2xl font-semibold text-gray-900">{formatCurrency(Number(reportData.revenue?.advancePayments) || 0)}</p>
+              <p className="mt-1 text-sm text-gray-600">{reportData.transactions?.advancePayments || 0} payments</p>
             </div>
 
             <div className="bg-white p-4 rounded-lg shadow-md">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-medium text-gray-500">Orders Revenue</h3>
-                <CreditCard className="h-5 w-5 text-purple-600" />
+                <Package className="h-5 w-5 text-purple-600" />
               </div>
-              <p className="mt-2 text-2xl font-semibold text-gray-900">{formatCurrency(reportData.revenue.orders)}</p>
-              <p className="mt-1 text-sm text-gray-600">{reportData.transactions.orders} orders</p>
+              <p className="mt-2 text-2xl font-semibold text-gray-900">{formatCurrency(Number(reportData.revenue?.orders) || 0)}</p>
+              <p className="mt-1 text-sm text-gray-600">{reportData.transactions?.orders || 0} orders</p>
             </div>
           </div>
 
@@ -524,15 +567,16 @@ export default function FinancialReportPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="p-4 bg-gray-50 rounded-md">
                 <h4 className="text-sm font-medium text-gray-500 mb-2">Total Profit</h4>
-                <p className="text-2xl font-semibold text-green-600">{formatCurrency(reportData.profitMargin.totalProfit || 0)}</p>
+                <p className="text-2xl font-semibold text-green-600">{formatCurrency(Number(reportData.profitMargin?.totalProfit) || 0)}</p>
               </div>
 
               <div className="p-4 bg-gray-50 rounded-md">
                 <h4 className="text-sm font-medium text-gray-500 mb-2">Average Profit Margin</h4>
                 <p className="text-2xl font-semibold text-blue-600">
-                  {reportData.profitMargin.averageProfitMargin && !isNaN(parseFloat(reportData.profitMargin.averageProfitMargin)) ?
-                    `${parseFloat(reportData.profitMargin.averageProfitMargin).toFixed(2)}%` :
-                    '0.00%'}
+                  {(() => {
+                    const avgMargin = Number(reportData.profitMargin?.averageProfitMargin);
+                    return !isNaN(avgMargin) ? `${avgMargin.toFixed(2)}%` : '0.00%';
+                  })()}
                 </p>
               </div>
             </div>

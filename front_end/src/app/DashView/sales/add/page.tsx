@@ -18,6 +18,7 @@ interface JewelleryItem {
   assay_status?: string;
   making_charges?: number;
   additional_materials_charges?: number;
+  profit_percentage?: number;
 }
 
 interface SaleItem {
@@ -37,6 +38,7 @@ interface SaleItem {
   // Charges
   making_charges?: number;
   additional_materials_charges?: number;
+  profit_percentage?: number;
 }
 
 const AddSalePage = () => {
@@ -59,6 +61,7 @@ const AddSalePage = () => {
   const [saleItems, setSaleItems] = useState<SaleItem[]>([]);
   const [userId, setUserId] = useState<string | null>(null);
   const [branchId, setBranchId] = useState<string | null>(null);
+  const [userRole, setUserRole] = useState<string>('');
 
   // UI states
   const [showItemDropdown, setShowItemDropdown] = useState(false);
@@ -87,6 +90,7 @@ const AddSalePage = () => {
   useEffect(() => {
     const storedUserId = localStorage.getItem('userId');
     const storedBranchId = localStorage.getItem('branchId');
+    const storedRole = localStorage.getItem('role');
 
     if (storedUserId) {
       setUserId(storedUserId);
@@ -96,6 +100,11 @@ const AddSalePage = () => {
     if (storedBranchId) {
       setBranchId(storedBranchId);
       console.log('Branch ID set from localStorage:', storedBranchId);
+    }
+
+    if (storedRole) {
+      setUserRole(storedRole);
+      console.log('User role set from localStorage:', storedRole);
     }
 
     // Fetch initial gold price
@@ -296,6 +305,22 @@ const AddSalePage = () => {
     }
   }, [searchTerm, availableItems]);
 
+  // Get maximum discount percentage based on user role
+  const getMaxDiscountPercentage = (): number => {
+    // Convert role to lowercase for case-insensitive comparison
+    const role = userRole.toLowerCase();
+
+    if (role.includes('cashier')) {
+      return 5; // Cashiers can give max 10% discount
+    } else if (role.includes('store') && role.includes('manager')) {
+      return 15; // Store Managers can give max 25% discount
+    } else if (role.includes('admin')) {
+      return 50; // Admins can give max 75% discount
+    } else {
+      return 10; // Default to 75% if role is unknown
+    }
+  };
+
   // Calculate price after discount
   const calculatePriceAfterDiscount = (originalPrice: number, discountAmount: number, discountType: 'percentage' | 'fixed'): number => {
     console.log('calculatePriceAfterDiscount - Inputs:', { originalPrice, discountAmount, discountType });
@@ -308,17 +333,21 @@ const AddSalePage = () => {
     let finalPrice: number;
 
     if (discountType === 'percentage') {
-      // Limit percentage discount to 75%
-      const limitedPercentage = Math.min(discountAmount, 75);
+      // Get maximum discount percentage based on user role
+      const maxDiscountPercentage = getMaxDiscountPercentage();
+      // Limit percentage discount to the maximum allowed for this user role
+      const limitedPercentage = Math.min(discountAmount, maxDiscountPercentage);
       finalPrice = originalPrice * (1 - limitedPercentage / 100);
       console.log('calculatePriceAfterDiscount - Percentage discount:', {
         originalPrice,
         discountPercentage: limitedPercentage,
+        maxAllowed: maxDiscountPercentage,
         finalPrice
       });
     } else {
-      // For fixed discount, ensure it doesn't exceed 75% of the original price
-      const maxDiscount = originalPrice * 0.75;
+      // For fixed discount, ensure it doesn't exceed the maximum percentage of the original price
+      const maxDiscountPercentage = getMaxDiscountPercentage();
+      const maxDiscount = originalPrice * (maxDiscountPercentage / 100);
       const limitedDiscount = Math.min(discountAmount, maxDiscount);
       finalPrice = originalPrice - limitedDiscount;
       console.log('calculatePriceAfterDiscount - Fixed discount:', {
@@ -326,6 +355,7 @@ const AddSalePage = () => {
         requestedDiscount: discountAmount,
         limitedDiscount,
         maxDiscount,
+        maxDiscountPercentage,
         finalPrice
       });
     }
@@ -613,38 +643,27 @@ const AddSalePage = () => {
       // Ensure it's a proper number by using parseFloat and rounding to 2 decimal places
       const subtotal = Math.round((quantity * finalPrice) * 100) / 100;
 
-      // For gold items, determine the original price based on gold calculation
-      let itemOriginalPrice;
+      // Determine if this is a gold-based price
       let isGoldPriceBased = false;
 
       if (selectedItem.gold_carat && selectedItem.weight) {
-        // For gold items, prioritize using the gold price calculation
-        if (baseGoldPricePerUnit > 0) {
-          // Use the calculated base gold price if available
-          itemOriginalPrice = baseGoldPricePerUnit;
+        // For gold items, check if we're using gold price calculation
+        if (baseGoldPricePerUnit > 0 || (calculatedPrice && calculatedPrice > 0) || (baseGoldPrice && selectedItem.weight)) {
           isGoldPriceBased = true;
-        } else if (calculatedPrice && calculatedPrice > 0) {
-          // Fall back to calculated price if baseGoldPricePerUnit isn't set yet
-          itemOriginalPrice = calculatedPrice;
-          isGoldPriceBased = true;
-        } else if (baseGoldPrice && selectedItem.weight) {
-          // Calculate directly if we have the base gold price and weight
-          itemOriginalPrice = baseGoldPrice * selectedItem.weight;
-          isGoldPriceBased = true;
-        } else {
-          // Last resort, use the original price
-          itemOriginalPrice = originalPrice;
         }
-      } else {
-        // For non-gold items, use the original price
-        itemOriginalPrice = originalPrice;
       }
+
+      // Set the original price to the selected unit price (before discount)
+      // This ensures the original price column in the sales table shows the selected price
+      const itemOriginalPrice = originalPrice;
 
       // Create the new item with gold information if applicable
       const newItem: SaleItem = {
         item_id: selectedItem.item_id,
         product_title: selectedItem.product_title,
         quantity,
+        // Set original_price to the selected unit price (before discount)
+        // This ensures the original price column in the sales table shows the selected price
         original_price: itemOriginalPrice,
         unit_price: finalPrice,
         discount_amount: discountAmount > 0 ? discountAmount : undefined,
@@ -657,7 +676,9 @@ const AddSalePage = () => {
         is_gold_price_based: isGoldPriceBased,
         // Add making charges and additional materials charges if they exist
         making_charges: selectedItem.making_charges,
-        additional_materials_charges: selectedItem.additional_materials_charges
+        additional_materials_charges: selectedItem.additional_materials_charges,
+        // Add profit percentage if it exists
+        profit_percentage: selectedItem.profit_percentage
       };
 
       // Check if item already exists in sale
@@ -680,6 +701,7 @@ const AddSalePage = () => {
         updatedItems[existingItemIndex] = {
           ...existingItem,
           quantity: newTotalQuantity,
+          // Keep the original price as is (don't update it)
           subtotal: Math.round((newTotalQuantity * existingItem.unit_price) * 100) / 100
         };
 
@@ -769,6 +791,8 @@ const AddSalePage = () => {
           // Recalculate subtotal to ensure it's correct
           const recalculatedSubtotal = item.quantity * item.unit_price;
 
+          // Ensure original_price is set to the selected unit price (before discount)
+          // This ensures the original price column in the sales table shows the selected price
           return {
             item_id: item.item_id,
             quantity: item.quantity,
@@ -784,7 +808,9 @@ const AddSalePage = () => {
             is_gold_price_based: item.is_gold_price_based,
             // Include making charges and additional materials charges
             making_charges: item.making_charges ? formatNumericValue(item.making_charges) : null,
-            additional_materials_charges: item.additional_materials_charges ? formatNumericValue(item.additional_materials_charges) : null
+            additional_materials_charges: item.additional_materials_charges ? formatNumericValue(item.additional_materials_charges) : null,
+            // Include profit percentage if available
+            profit_percentage: item.profit_percentage ? formatNumericValue(item.profit_percentage) : null
           };
         }),
         user_id: userId,
@@ -1006,165 +1032,326 @@ const AddSalePage = () => {
             <div className="flex items-center mb-4">
               <div className="w-32 font-medium">Gold Details</div>
               <div className="flex-1">
-                <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-md">
-                  <div className="flex justify-between">
-                    <span className="text-sm font-medium">Karat:</span>
-                    <span className="text-sm font-bold">{selectedItem.gold_carat}KT</span>
-                  </div>
-                  <div className="flex justify-between mt-1">
-                    <span className="text-sm font-medium">Weight:</span>
-                    <span className="text-sm font-bold">{selectedItem.weight} grams</span>
-                  </div>
+                {/* Cashier View - Simplified Gold Details */}
+                {userRole.toLowerCase().includes('cashier') ? (
+                  <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-md">
+                    <div className="flex justify-between">
+                      <span className="text-sm font-medium">Karat:</span>
+                      <span className="text-sm font-bold">{selectedItem.gold_carat}KT</span>
+                    </div>
+                    <div className="flex justify-between mt-1">
+                      <span className="text-sm font-medium">Weight:</span>
+                      <span className="text-sm font-bold">{selectedItem.weight} grams</span>
+                    </div>
 
-                  {/* Gold Price Information */}
-                  <div className="mt-3 pt-2 border-t border-yellow-200">
-                    <div className="text-sm font-medium mb-1">Gold Price Information:</div>
+                    {/* Simplified Gold Price Information for Cashiers */}
+                    <div className="mt-3 pt-2 border-t border-yellow-200">
+                      {/* Show only the final price */}
+                      <div className="grid grid-cols-2 gap-1 text-sm">
+                        <span className="font-medium">Total Price:</span>
+                        <span className="text-right font-bold">
+                          {(() => {
+                            // Calculate the total with charges
+                            const makingCharges = selectedItem.making_charges ? parseFloat(String(selectedItem.making_charges)) : 0;
+                            const additionalMaterialsCharges = selectedItem.additional_materials_charges ? parseFloat(String(selectedItem.additional_materials_charges)) : 0;
 
-                    {isLoadingGoldPrice ? (
-                      <div className="flex items-center justify-center py-2">
-                        <span className="inline-block w-4 h-4 mr-1 border-2 border-t-transparent border-yellow-400 rounded-full animate-spin"></span>
-                        <span className="text-sm">Loading gold price...</span>
+                            // Calculate gold value
+                            let goldValue = 0;
+                            if (calculatedPrice && calculatedPrice > 0) {
+                              goldValue = calculatedPrice;
+                            } else if (baseGoldPrice && selectedItem.weight) {
+                              goldValue = baseGoldPrice * selectedItem.weight;
+                            }
+
+                            const totalWithCharges = goldValue + makingCharges + additionalMaterialsCharges;
+
+                            // Calculate with profit
+                            const profitPercentage = selectedItem.profit_percentage !== undefined && selectedItem.profit_percentage > 0
+                              ? parseFloat(String(selectedItem.profit_percentage))
+                              : 0;
+                            const profitAmount = totalWithCharges * (profitPercentage / 100);
+                            const totalWithProfit = totalWithCharges + profitAmount;
+
+                            // Force to 2 decimal places for display
+                            const roundedTotal = Math.round(totalWithProfit * 100) / 100;
+
+                            return formatCurrency(roundedTotal);
+                          })()}
+                        </span>
+
+                        <span>Catalog price:</span>
+                        <span className="text-right font-medium">{formatCurrency(selectedItem.selling_price)}</span>
                       </div>
-                    ) : (
-                      <>
-                        <div className="flex justify-between mt-1">
-                          <span className="text-sm">{selectedItem.gold_carat}KT Base Price:</span>
-                          <div className="flex items-center">
-                            <span className="text-sm mr-2">{formatCurrency(baseGoldPrice)}/gram</span>
-                            <button
-                              type="button"
-                              className="text-xs bg-yellow-400 text-black px-2 py-0.5 rounded"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                // Fetch the specific karat price
-                                const karatNumber = selectedItem?.gold_carat || 0;
-                                if (karatNumber > 0) {
-                                  fetchKaratPrice(karatNumber).then(price => {
-                                    if (price > 0 && selectedItem?.gold_carat && selectedItem?.weight) {
-                                      // Calculate the base gold price directly
-                                      const calculatedGoldPrice = price * selectedItem.weight;
-                                      console.log('Refresh button: Setting baseGoldPricePerUnit to:', calculatedGoldPrice);
 
-                                      // Update all the state variables in one go to ensure consistency
-                                      setBaseGoldPricePerUnit(calculatedGoldPrice);
-                                      setCalculatedPrice(calculatedGoldPrice);
-                                      setUseGoldPriceCalculation(true);
-
-                                      // Force a re-render by updating a non-critical state
-                                      setGoldPriceLastUpdated(new Date().toLocaleString());
-
-                                      // Re-trigger the item selection to recalculate everything
-                                      // handleSelectItem(selectedItem);
-                                    }
-                                  });
-                                }
-                              }}
-                            >
-                              Refresh
-                            </button>
-                          </div>
+                      <div className="mt-3 pt-2 border-t border-yellow-200 text-xs text-gray-600">
+                        <div className="flex justify-between">
+                          <span>Item Type:</span>
+                          <span className="font-medium">Gold Jewellery</span>
                         </div>
 
-                        {goldPriceLastUpdated && (
-                          <div className="text-xs text-gray-500 mt-1 text-right">
-                            Last updated: {goldPriceLastUpdated}
+                        {selectedItem.assay_certificate && (
+                          <div className="flex justify-between mt-1">
+                            <span>Certificate:</span>
+                            <span className="font-medium text-green-600">Certified Gold</span>
                           </div>
                         )}
-                      </>
-                    )}
-                  </div>
-
-                  {/* Calculation */}
-                  {calculatedPrice && calculatedPrice > 0 && (
-                    <div className="mt-3 pt-2 border-t border-yellow-200">
-                      <div className="text-sm font-medium mb-1">Price Calculation:</div>
-                      <div className="grid grid-cols-2 gap-1 text-sm">
-                        <span>Gold Price:</span>
-                        <span className="text-right">
-                          {formatCurrency(baseGoldPrice)}/gram
-                        </span>
-                        <span>Weight:</span>
-                        <span className="text-right">{selectedItem.weight} grams</span>
-                        <span className="font-medium">Total Gold Value:</span>
-                        <span className="text-right font-bold">{formatCurrency(calculatedPrice)}</span>
-
-                        {/* Show making charges if they exist */}
-                        {selectedItem.making_charges && selectedItem.making_charges > 0 && (
-                          <>
-                            <span>Making Charges:</span>
-                            <span className="text-right">{formatCurrency(selectedItem.making_charges)}</span>
-                          </>
-                        )}
-
-                        {/* Show additional materials charges if they exist */}
-                        {selectedItem.additional_materials_charges && selectedItem.additional_materials_charges > 0 && (
-                          <>
-                            <span>Additional Materials:</span>
-                            <span className="text-right">{formatCurrency(selectedItem.additional_materials_charges)}</span>
-                          </>
-                        )}
-
-                        {/* Show total with charges if they exist */}
-                        {(selectedItem.making_charges || selectedItem.additional_materials_charges) && (
-                          <>
-                            <span className="font-medium">Total with Charges:</span>
-                            <span className="text-right font-bold">
-                              {(() => {
-                                // Calculate the total with charges correctly
-                                const makingCharges = selectedItem.making_charges ? parseFloat(String(selectedItem.making_charges)) : 0;
-                                const additionalMaterialsCharges = selectedItem.additional_materials_charges ? parseFloat(String(selectedItem.additional_materials_charges)) : 0;
-                                const totalWithCharges = calculatedPrice + makingCharges + additionalMaterialsCharges;
-
-                                // Force to 2 decimal places for display
-                                const roundedTotal = Math.round(totalWithCharges * 100) / 100;
-
-                                // Log for debugging
-                                console.log('Total with Charges calculation:', {
-                                  calculatedPrice,
-                                  makingCharges,
-                                  additionalMaterialsCharges,
-                                  totalWithCharges,
-                                  roundedTotal
-                                });
-
-                                return formatCurrency(roundedTotal);
-                              })()}
-                            </span>
-                          </>
-                        )}
                       </div>
+                    </div>
+                  </div>
+                ) : (
+                  /* Regular View for Store Managers and Admins */
+                  <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-md">
+                    <div className="flex justify-between">
+                      <span className="text-sm font-medium">Karat:</span>
+                      <span className="text-sm font-bold">{selectedItem.gold_carat}KT</span>
+                    </div>
+                    <div className="flex justify-between mt-1">
+                      <span className="text-sm font-medium">Weight:</span>
+                      <span className="text-sm font-bold">{selectedItem.weight} grams</span>
+                    </div>
 
-                      <div className="mt-2 flex justify-end">
-                        <button
-                          type="button"
-                          className="bg-yellow-400 text-black px-2 py-1 rounded text-xs"
-                          onClick={() => {
-                            // Calculate total price including making charges and additional materials charges
+                    {/* Gold Price Information */}
+                    <div className="mt-3 pt-2 border-t border-yellow-200">
+                      <div className="text-sm font-medium mb-1">Gold Price Information:</div>
+
+                      {isLoadingGoldPrice ? (
+                        <div className="flex items-center justify-center py-2">
+                          <span className="inline-block w-4 h-4 mr-1 border-2 border-t-transparent border-yellow-400 rounded-full animate-spin"></span>
+                          <span className="text-sm">Loading gold price...</span>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex justify-between mt-1">
+                            <span className="text-sm">{selectedItem.gold_carat}KT Base Price:</span>
+                            <div className="flex items-center">
+                              <span className="text-sm mr-2">{formatCurrency(baseGoldPrice)}/gram</span>
+                              <button
+                                type="button"
+                                className="text-xs bg-yellow-400 text-black px-2 py-0.5 rounded"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  // Fetch the specific karat price
+                                  const karatNumber = selectedItem?.gold_carat || 0;
+                                  if (karatNumber > 0) {
+                                    fetchKaratPrice(karatNumber).then(price => {
+                                      if (price > 0 && selectedItem?.gold_carat && selectedItem?.weight) {
+                                        // Calculate the base gold price directly
+                                        const calculatedGoldPrice = price * selectedItem.weight;
+                                        console.log('Refresh button: Setting baseGoldPricePerUnit to:', calculatedGoldPrice);
+
+                                        // Update all the state variables in one go to ensure consistency
+                                        setBaseGoldPricePerUnit(calculatedGoldPrice);
+                                        setCalculatedPrice(calculatedGoldPrice);
+                                        setUseGoldPriceCalculation(true);
+
+                                        // Force a re-render by updating a non-critical state
+                                        setGoldPriceLastUpdated(new Date().toLocaleString());
+
+                                        // Re-trigger the item selection to recalculate everything
+                                        // handleSelectItem(selectedItem);
+                                      }
+                                    });
+                                  }
+                                }}
+                              >
+                                Refresh
+                              </button>
+                            </div>
+                          </div>
+
+                          {goldPriceLastUpdated && (
+                            <div className="text-xs text-gray-500 mt-1 text-right">
+                              Last updated: {goldPriceLastUpdated}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+
+                    {/* Calculation */}
+                    {calculatedPrice && calculatedPrice > 0 && (
+                      <div className="mt-3 pt-2 border-t border-yellow-200">
+                        <div className="text-sm font-medium mb-1">Price Calculation:</div>
+                        <div className="grid grid-cols-2 gap-1 text-sm">
+                          <span>Gold Price:</span>
+                          <span className="text-right">
+                            {formatCurrency(baseGoldPrice)}/gram
+                          </span>
+                          <span>Weight:</span>
+                          <span className="text-right">{selectedItem.weight} grams</span>
+                          <span className="font-medium">Total Gold Value:</span>
+                          <span className="text-right font-bold">{formatCurrency(calculatedPrice)}</span>
+
+                          {/* Show making charges if they exist */}
+                          {selectedItem.making_charges && selectedItem.making_charges > 0 && (
+                            <>
+                              <span>Making Charges:</span>
+                              <span className="text-right">{formatCurrency(selectedItem.making_charges)}</span>
+                            </>
+                          )}
+
+                          {/* Show additional materials charges if they exist */}
+                          {selectedItem.additional_materials_charges && selectedItem.additional_materials_charges > 0 && (
+                            <>
+                              <span>Additional Materials:</span>
+                              <span className="text-right">{formatCurrency(selectedItem.additional_materials_charges)}</span>
+                            </>
+                          )}
+
+                          {/* Show total with charges if they exist */}
+                          {(selectedItem.making_charges || selectedItem.additional_materials_charges) && (
+                            <>
+                              <span className="font-medium">Total with Charges:</span>
+                              <span className="text-right font-bold">
+                                {(() => {
+                                  // Calculate the total with charges correctly
+                                  const makingCharges = selectedItem.making_charges ? parseFloat(String(selectedItem.making_charges)) : 0;
+                                  const additionalMaterialsCharges = selectedItem.additional_materials_charges ? parseFloat(String(selectedItem.additional_materials_charges)) : 0;
+                                  const totalWithCharges = calculatedPrice + makingCharges + additionalMaterialsCharges;
+
+                                  // Force to 2 decimal places for display
+                                  const roundedTotal = Math.round(totalWithCharges * 100) / 100;
+
+                                  // Log for debugging
+                                  console.log('Total with Charges calculation:', {
+                                    calculatedPrice,
+                                    makingCharges,
+                                    additionalMaterialsCharges,
+                                    totalWithCharges,
+                                    roundedTotal
+                                  });
+
+                                  return formatCurrency(roundedTotal);
+                                })()}
+                              </span>
+                            </>
+                          )}
+
+                          {/* Show profit percentage calculation */}
+                          {(() => {
+                            // Use the item's profit percentage (no default)
+                            const profitPercentage = selectedItem.profit_percentage !== undefined && selectedItem.profit_percentage > 0
+                              ? parseFloat(String(selectedItem.profit_percentage))
+                              : 0;
+
+                            // Calculate the total with charges
                             const makingCharges = selectedItem.making_charges ? parseFloat(String(selectedItem.making_charges)) : 0;
                             const additionalMaterialsCharges = selectedItem.additional_materials_charges ? parseFloat(String(selectedItem.additional_materials_charges)) : 0;
                             const totalWithCharges = calculatedPrice + makingCharges + additionalMaterialsCharges;
 
-                            // Force to 2 decimal places for consistency
-                            const roundedTotal = Math.round(totalWithCharges * 100) / 100;
+                            // Calculate profit amount
+                            const profitAmount = totalWithCharges * (profitPercentage / 100);
 
-                            console.log('Setting custom price to total with charges:', {
-                              calculatedPrice,
-                              makingCharges,
-                              additionalMaterialsCharges,
-                              totalWithCharges,
-                              roundedTotal
-                            });
+                            // Force to 2 decimal places for display
+                            const roundedProfit = Math.round(profitAmount * 100) / 100;
 
-                            // Set the custom price to the rounded total with charges
-                            setCustomPrice(roundedTotal);
-                          }}
-                        >
-                          Use Total Price with Charges
-                        </button>
+                            // Calculate total with profit
+                            const totalWithProfit = totalWithCharges + profitAmount;
+                            const roundedTotalWithProfit = Math.round(totalWithProfit * 100) / 100;
+
+                            return (
+                              <>
+                                <span>Profit ({profitPercentage}%):</span>
+                                <span className="text-right">{formatCurrency(roundedProfit)}</span>
+
+                                <span className="font-medium">Total with Profit:</span>
+                                <span className="text-right font-bold">{formatCurrency(roundedTotalWithProfit)}</span>
+                              </>
+                            );
+                          })()}
+
+                          {/* Show profit percentage calculation if it exists */}
+                          {selectedItem.profit_percentage && selectedItem.profit_percentage > 0 && (
+                            <>
+                              <span>Profit ({selectedItem.profit_percentage}%):</span>
+                              <span className="text-right">
+                                {(() => {
+                                  // Calculate the total with charges
+                                  const makingCharges = selectedItem.making_charges ? parseFloat(String(selectedItem.making_charges)) : 0;
+                                  const additionalMaterialsCharges = selectedItem.additional_materials_charges ? parseFloat(String(selectedItem.additional_materials_charges)) : 0;
+                                  const totalWithCharges = calculatedPrice + makingCharges + additionalMaterialsCharges;
+
+                                  // Calculate profit amount
+                                  const profitPercentage = selectedItem.profit_percentage ? parseFloat(String(selectedItem.profit_percentage)) : 0;
+                                  const profitAmount = totalWithCharges * (profitPercentage / 100);
+
+                                  // Force to 2 decimal places for display
+                                  const roundedProfit = Math.round(profitAmount * 100) / 100;
+
+                                  return formatCurrency(roundedProfit);
+                                })()}
+                              </span>
+                            </>
+                          )}
+
+                          {/* Show final price with profit if profit percentage exists */}
+                          {selectedItem.profit_percentage && selectedItem.profit_percentage > 0 && (
+                            <>
+                              <span className="font-medium">Gold value with profit:</span>
+                              <span className="text-right font-bold">
+                                {(() => {
+                                  // Calculate the total with charges
+                                  const makingCharges = selectedItem.making_charges ? parseFloat(String(selectedItem.making_charges)) : 0;
+                                  const additionalMaterialsCharges = selectedItem.additional_materials_charges ? parseFloat(String(selectedItem.additional_materials_charges)) : 0;
+                                  const totalWithCharges = calculatedPrice + makingCharges + additionalMaterialsCharges;
+
+                                  // Calculate with profit
+                                  const profitPercentage = selectedItem.profit_percentage ? parseFloat(String(selectedItem.profit_percentage)) : 0;
+                                  const profitAmount = totalWithCharges * (profitPercentage / 100);
+                                  const totalWithProfit = totalWithCharges + profitAmount;
+
+                                  // Force to 2 decimal places for display
+                                  const roundedTotal = Math.round(totalWithProfit * 100) / 100;
+
+                                  return formatCurrency(roundedTotal);
+                                })()}
+                              </span>
+                            </>
+                          )}
+                        </div>
+
+                        <div className="mt-2 flex justify-end">
+                          <button
+                            type="button"
+                            className="bg-yellow-400 text-black px-2 py-1 rounded text-xs"
+                            onClick={() => {
+                              // Calculate total price including making charges and additional materials charges
+                              const makingCharges = selectedItem.making_charges ? parseFloat(String(selectedItem.making_charges)) : 0;
+                              const additionalMaterialsCharges = selectedItem.additional_materials_charges ? parseFloat(String(selectedItem.additional_materials_charges)) : 0;
+                              const totalWithCharges = calculatedPrice + makingCharges + additionalMaterialsCharges;
+
+                              // Use the item's profit percentage (no default)
+                              const profitPercentage = selectedItem.profit_percentage !== undefined && selectedItem.profit_percentage > 0
+                                ? parseFloat(String(selectedItem.profit_percentage))
+                                : 0;
+                              const profitAmount = totalWithCharges * (profitPercentage / 100);
+                              const totalWithProfit = totalWithCharges + profitAmount;
+
+                              // Force to 2 decimal places for consistency
+                              const roundedTotal = Math.round(totalWithProfit * 100) / 100;
+
+                              console.log('Setting custom price to total with charges and profit:', {
+                                calculatedPrice,
+                                makingCharges,
+                                additionalMaterialsCharges,
+                                totalWithCharges,
+                                profitPercentage,
+                                profitAmount,
+                                totalWithProfit,
+                                roundedTotal
+                              });
+
+                              // Set the custom price to the rounded total with charges and profit
+                              setCustomPrice(roundedTotal);
+                            }}
+                          >
+                            Use Total Price with Charges & Profit
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  )}
-                </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -1181,66 +1368,136 @@ const AddSalePage = () => {
                       calculatedPrice && calculatedPrice > 0
                         ? 'border-yellow-400'
                         : 'border-gray-300'
-                    } rounded-md`}
+                    } rounded-md ${userRole.toLowerCase().includes('cashier') ? 'bg-gray-100' : ''}`}
                     value={customPrice !== null ? customPrice : selectedItem.selling_price}
                     onChange={(e) => {
-                      const value = parseFloat(e.target.value);
-                      if (!isNaN(value) && value > 0) {
-                        setCustomPrice(value);
-                      } else if (e.target.value === '') {
-                        setCustomPrice(null); // Reset to original price
+                      // Only allow price changes for non-cashiers
+                      if (!userRole.toLowerCase().includes('cashier')) {
+                        const value = parseFloat(e.target.value);
+                        if (!isNaN(value) && value > 0) {
+                          setCustomPrice(value);
+                        } else if (e.target.value === '') {
+                          setCustomPrice(null); // Reset to original price
+                        }
                       }
                     }}
                     placeholder="Enter custom price"
                     min="0"
                     step="0.01"
+                    disabled={userRole.toLowerCase().includes('cashier')}
+                    readOnly={userRole.toLowerCase().includes('cashier')}
                   />
 
                   {/* Price selection buttons */}
                   <div className="absolute right-2 top-2 flex space-x-1">
-                    {calculatedPrice && calculatedPrice > 0 && (
-                      <button
-                        type="button"
-                        className={`px-2 py-1 rounded text-xs ${
-                          customPrice === calculatedPrice
-                            ? 'bg-yellow-500 text-white'
-                            : 'bg-yellow-400 text-black'
-                        }`}
-                        onClick={() => setCustomPrice(calculatedPrice)}
-                      >
-                        Use Gold Price
-                      </button>
-                    )}
+                    {/* Cashier View - Limited Price Options */}
+                    {userRole.toLowerCase().includes('cashier') ? (
+                      <>
+                        {/* Button to use gold value with profit */}
+                        <button
+                          type="button"
+                          className={`px-2 py-1 rounded text-xs ${
+                            customPrice !== null && customPrice !== selectedItem.selling_price
+                              ? 'bg-yellow-500 text-white'
+                              : 'bg-yellow-400 text-black'
+                          }`}
+                          onClick={() => {
+                            // Calculate the gold value with profit
+                            const makingCharges = selectedItem.making_charges ? parseFloat(String(selectedItem.making_charges)) : 0;
+                            const additionalMaterialsCharges = selectedItem.additional_materials_charges ? parseFloat(String(selectedItem.additional_materials_charges)) : 0;
 
-                    {/* Button to explicitly use catalog price */}
-                    <button
-                      type="button"
-                      className={`px-2 py-1 rounded text-xs ${
-                        customPrice === null
-                          ? 'bg-blue-500 text-white'
-                          : 'bg-blue-400 text-black'
-                      }`}
-                      onClick={() => {
-                        setCustomPrice(null);
-                        setUseGoldPriceCalculation(false);
-                        console.log('Using catalog price, setting useGoldPriceCalculation to false');
-                      }}
-                    >
-                      Use Catalog Price
-                    </button>
+                            // Calculate gold value
+                            let goldValue = 0;
+                            if (calculatedPrice && calculatedPrice > 0) {
+                              goldValue = calculatedPrice;
+                            } else if (baseGoldPrice && selectedItem.weight) {
+                              goldValue = baseGoldPrice * selectedItem.weight;
+                            }
 
-                    {customPrice !== null && (
-                      <button
-                        type="button"
-                        className="bg-gray-200 text-gray-700 px-2 py-1 rounded text-xs"
-                        onClick={() => {
-                          setCustomPrice(null);
-                          setUseGoldPriceCalculation(false);
-                          console.log('Reset button clicked, setting useGoldPriceCalculation to false');
-                        }}
-                      >
-                        Reset
-                      </button>
+                            const totalWithCharges = goldValue + makingCharges + additionalMaterialsCharges;
+
+                            // Calculate with profit
+                            const profitPercentage = selectedItem.profit_percentage !== undefined && selectedItem.profit_percentage > 0
+                              ? parseFloat(String(selectedItem.profit_percentage))
+                              : 0;
+                            const profitAmount = totalWithCharges * (profitPercentage / 100);
+                            const totalWithProfit = totalWithCharges + profitAmount;
+
+                            // Force to 2 decimal places for display
+                            const roundedTotal = Math.round(totalWithProfit * 100) / 100;
+
+                            setCustomPrice(roundedTotal);
+                            setUseGoldPriceCalculation(true);
+                          }}
+                        >
+                          Use Total Price
+                        </button>
+
+                        {/* Button to use catalog price */}
+                        <button
+                          type="button"
+                          className={`px-2 py-1 rounded text-xs ${
+                            customPrice === null
+                              ? 'bg-blue-500 text-white'
+                              : 'bg-blue-400 text-black'
+                          }`}
+                          onClick={() => {
+                            setCustomPrice(null);
+                            setUseGoldPriceCalculation(false);
+                            console.log('Cashier using catalog price, setting useGoldPriceCalculation to false');
+                          }}
+                        >
+                          Use Catalog Price
+                        </button>
+                      </>
+                    ) : (
+                      /* Regular View for Store Managers and Admins */
+                      <>
+                        {calculatedPrice && calculatedPrice > 0 && (
+                          <button
+                            type="button"
+                            className={`px-2 py-1 rounded text-xs ${
+                              customPrice === calculatedPrice
+                                ? 'bg-yellow-500 text-white'
+                                : 'bg-yellow-400 text-black'
+                            }`}
+                            onClick={() => setCustomPrice(calculatedPrice)}
+                          >
+                            Use Gold Price
+                          </button>
+                        )}
+
+                        {/* Button to explicitly use catalog price */}
+                        <button
+                          type="button"
+                          className={`px-2 py-1 rounded text-xs ${
+                            customPrice === null
+                              ? 'bg-blue-500 text-white'
+                              : 'bg-blue-400 text-black'
+                          }`}
+                          onClick={() => {
+                            setCustomPrice(null);
+                            setUseGoldPriceCalculation(false);
+                            console.log('Using catalog price, setting useGoldPriceCalculation to false');
+                          }}
+                        >
+                          Use Catalog Price
+                        </button>
+
+                        {customPrice !== null && (
+                          <button
+                            type="button"
+                            className="bg-gray-200 text-gray-700 px-2 py-1 rounded text-xs"
+                            onClick={() => {
+                              setCustomPrice(null);
+                              setUseGoldPriceCalculation(false);
+                              console.log('Reset button clicked, setting useGoldPriceCalculation to false');
+                            }}
+                          >
+                            Reset
+                          </button>
+                        )}
+                      </>
                     )}
                   </div>
                 </div>
@@ -1250,58 +1507,163 @@ const AddSalePage = () => {
 
               {/* Price comparison information */}
               <div className="mt-2 grid grid-cols-2 gap-2">
-                {selectedItem && (
-                  <div className={`text-xs ${customPrice !== null ? 'text-gray-500' : 'text-blue-600 font-medium'}`}>
-                    <span className="mr-1">Catalog price:</span>
-                    <span>{formatCurrency(selectedItem.selling_price)}</span>
-                    {customPrice === null && (
-                      <span className="ml-1 text-blue-600 font-medium">(Selected)</span>
+                {/* Cashier View - Simplified Price Comparison */}
+                {userRole.toLowerCase().includes('cashier') ? (
+                  <>
+                    {selectedItem && (
+                      <div className={`text-xs ${customPrice !== null ? 'text-gray-500' : 'text-blue-600 font-medium'}`}>
+                        <span className="mr-1">Catalog price:</span>
+                        <span>{formatCurrency(selectedItem.selling_price)}</span>
+                        {customPrice === null && (
+                          <span className="ml-1 text-blue-600 font-medium">(Selected)</span>
+                        )}
+                      </div>
                     )}
-                  </div>
-                )}
 
-                {calculatedPrice && calculatedPrice > 0 && (
-                  <div className={`text-xs ${customPrice === calculatedPrice ? 'text-yellow-600 font-medium' : 'text-yellow-600'}`}>
-                    <span className="mr-1">Gold value price:</span>
-                    <span>{formatCurrency(calculatedPrice)}</span>
-                    {customPrice === calculatedPrice && (
-                      <span className="ml-1 text-yellow-600 font-medium">(Selected)</span>
+                    {/* Show gold value with profit for gold items */}
+                    {selectedItem && selectedItem.gold_carat && selectedItem.weight && (
+                      <div className={`text-xs ${
+                        customPrice !== null && customPrice !== selectedItem.selling_price
+                          ? 'text-yellow-600 font-medium'
+                          : 'text-yellow-600'
+                      }`}>
+                        <span className="mr-1">Total Price:</span>
+                        <span>
+                          {(() => {
+                            // Calculate the gold value with profit
+                            const makingCharges = selectedItem.making_charges ? parseFloat(String(selectedItem.making_charges)) : 0;
+                            const additionalMaterialsCharges = selectedItem.additional_materials_charges ? parseFloat(String(selectedItem.additional_materials_charges)) : 0;
+
+                            // Calculate gold value
+                            let goldValue = 0;
+                            if (calculatedPrice && calculatedPrice > 0) {
+                              goldValue = calculatedPrice;
+                            } else if (baseGoldPrice && selectedItem.weight) {
+                              goldValue = baseGoldPrice * selectedItem.weight;
+                            }
+
+                            const totalWithCharges = goldValue + makingCharges + additionalMaterialsCharges;
+
+                            // Calculate with profit
+                            const profitPercentage = selectedItem.profit_percentage !== undefined && selectedItem.profit_percentage > 0
+                              ? parseFloat(String(selectedItem.profit_percentage))
+                              : 0;
+                            const profitAmount = totalWithCharges * (profitPercentage / 100);
+                            const totalWithProfit = totalWithCharges + profitAmount;
+
+                            // Force to 2 decimal places for display
+                            const roundedTotal = Math.round(totalWithProfit * 100) / 100;
+
+                            return formatCurrency(roundedTotal);
+                          })()}
+                        </span>
+
+                        {/* Show selected indicator if this price is being used */}
+                        {(() => {
+                          // Calculate the gold value with profit
+                          const makingCharges = selectedItem.making_charges ? parseFloat(String(selectedItem.making_charges)) : 0;
+                          const additionalMaterialsCharges = selectedItem.additional_materials_charges ? parseFloat(String(selectedItem.additional_materials_charges)) : 0;
+
+                          // Calculate gold value
+                          let goldValue = 0;
+                          if (calculatedPrice && calculatedPrice > 0) {
+                            goldValue = calculatedPrice;
+                          } else if (baseGoldPrice && selectedItem.weight) {
+                            goldValue = baseGoldPrice * selectedItem.weight;
+                          }
+
+                          const totalWithCharges = goldValue + makingCharges + additionalMaterialsCharges;
+
+                          // Calculate with profit
+                          const profitPercentage = selectedItem.profit_percentage !== undefined && selectedItem.profit_percentage > 0
+                            ? parseFloat(String(selectedItem.profit_percentage))
+                            : 0;
+                          const profitAmount = totalWithCharges * (profitPercentage / 100);
+                          const totalWithProfit = totalWithCharges + profitAmount;
+
+                          // Force to 2 decimal places for display
+                          const roundedTotal = Math.round(totalWithProfit * 100) / 100;
+
+                          // Check if this is the selected price
+                          const isSelected = customPrice !== null && Math.abs(customPrice - roundedTotal) < 0.01;
+
+                          return isSelected ? <span className="ml-1 text-yellow-600 font-medium">(Selected)</span> : null;
+                        })()}
+                      </div>
                     )}
-                  </div>
-                )}
+                  </>
+                ) : (
+                  /* Regular View for Store Managers and Admins */
+                  <>
+                    {selectedItem && (
+                      <div className={`text-xs ${customPrice !== null ? 'text-gray-500' : 'text-blue-600 font-medium'}`}>
+                        <span className="mr-1">Catalog price:</span>
+                        <span>{formatCurrency(selectedItem.selling_price)}</span>
+                        {customPrice === null && (
+                          <span className="ml-1 text-blue-600 font-medium">(Selected)</span>
+                        )}
+                      </div>
+                    )}
 
-                {/* Show total with charges as a separate line if it exists */}
-                {selectedItem && (selectedItem.making_charges || selectedItem.additional_materials_charges) && calculatedPrice && calculatedPrice > 0 && (
-                  <div className="text-xs text-green-600">
-                    <span className="mr-1">Gold value with charges:</span>
-                    <span>{(() => {
-                      const makingCharges = selectedItem.making_charges ? parseFloat(String(selectedItem.making_charges)) : 0;
-                      const additionalMaterialsCharges = selectedItem.additional_materials_charges ? parseFloat(String(selectedItem.additional_materials_charges)) : 0;
-                      const totalWithCharges = calculatedPrice + makingCharges + additionalMaterialsCharges;
+                    {calculatedPrice && calculatedPrice > 0 && (
+                      <div className={`text-xs ${customPrice === calculatedPrice ? 'text-yellow-600 font-medium' : 'text-yellow-600'}`}>
+                        <span className="mr-1">Gold value price:</span>
+                        <span>{formatCurrency(calculatedPrice)}</span>
+                        {customPrice === calculatedPrice && (
+                          <span className="ml-1 text-yellow-600 font-medium">(Selected)</span>
+                        )}
+                      </div>
+                    )}
 
-                      // Force to 2 decimal places for consistency
-                      const roundedTotal = Math.round(totalWithCharges * 100) / 100;
-                      return formatCurrency(roundedTotal);
-                    })()}</span>
-                    {(() => {
-                      const makingCharges = selectedItem.making_charges ? parseFloat(String(selectedItem.making_charges)) : 0;
-                      const additionalMaterialsCharges = selectedItem.additional_materials_charges ? parseFloat(String(selectedItem.additional_materials_charges)) : 0;
-                      const totalWithCharges = calculatedPrice + makingCharges + additionalMaterialsCharges;
-                      const roundedTotal = Math.round(totalWithCharges * 100) / 100;
+                    {/* Show total with charges as a separate line if it exists */}
+                    {selectedItem && (selectedItem.making_charges || selectedItem.additional_materials_charges) && calculatedPrice && calculatedPrice > 0 && (
+                      <div className="text-xs text-green-600">
+                        <span className="mr-1">Gold value with charges:</span>
+                        <span>{(() => {
+                          const makingCharges = selectedItem.making_charges ? parseFloat(String(selectedItem.making_charges)) : 0;
+                          const additionalMaterialsCharges = selectedItem.additional_materials_charges ? parseFloat(String(selectedItem.additional_materials_charges)) : 0;
+                          const totalWithCharges = calculatedPrice + makingCharges + additionalMaterialsCharges;
 
-                      // Check if this is the selected price
-                      const isSelected = customPrice !== null && Math.abs(customPrice - roundedTotal) < 0.01;
+                          // Use the item's profit percentage (no default)
+                          const profitPercentage = selectedItem.profit_percentage !== undefined && selectedItem.profit_percentage > 0
+                            ? parseFloat(String(selectedItem.profit_percentage))
+                            : 0;
+                          const profitAmount = totalWithCharges * (profitPercentage / 100);
+                          const totalWithProfit = totalWithCharges + profitAmount;
 
-                      return isSelected ? <span className="ml-1 text-green-600 font-medium">(Selected)</span> : null;
-                    })()}
-                  </div>
-                )}
+                          // Force to 2 decimal places for consistency
+                          const roundedTotal = Math.round(totalWithProfit * 100) / 100;
+                          return formatCurrency(roundedTotal);
+                        })()}</span>
+                        {(() => {
+                          const makingCharges = selectedItem.making_charges ? parseFloat(String(selectedItem.making_charges)) : 0;
+                          const additionalMaterialsCharges = selectedItem.additional_materials_charges ? parseFloat(String(selectedItem.additional_materials_charges)) : 0;
+                          const totalWithCharges = calculatedPrice + makingCharges + additionalMaterialsCharges;
 
-                {customPrice !== null && customPrice !== calculatedPrice && selectedItem && customPrice !== selectedItem.selling_price && (
-                  <div className="text-xs text-blue-600 font-medium">
-                    <span className="mr-1">Custom price:</span>
-                    <span>{formatCurrency(customPrice)}</span>
-                  </div>
+                          // Use the item's profit percentage (no default)
+                          const profitPercentage = selectedItem.profit_percentage !== undefined && selectedItem.profit_percentage > 0
+                            ? parseFloat(String(selectedItem.profit_percentage))
+                            : 0;
+                          const profitAmount = totalWithCharges * (profitPercentage / 100);
+                          const totalWithProfit = totalWithCharges + profitAmount;
+
+                          const roundedTotal = Math.round(totalWithProfit * 100) / 100;
+
+                          // Check if this is the selected price
+                          const isSelected = customPrice !== null && Math.abs(customPrice - roundedTotal) < 0.01;
+
+                          return isSelected ? <span className="ml-1 text-green-600 font-medium">(Selected)</span> : null;
+                        })()}
+                      </div>
+                    )}
+
+                    {customPrice !== null && customPrice !== calculatedPrice && selectedItem && customPrice !== selectedItem.selling_price && (
+                      <div className="text-xs text-blue-600 font-medium">
+                        <span className="mr-1">Custom price:</span>
+                        <span>{formatCurrency(customPrice)}</span>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             </div>
@@ -1319,8 +1681,8 @@ const AddSalePage = () => {
             return null;
           })()}
 
-          {/* Show Base Gold Price for gold items */}
-          {selectedItem && selectedItem.gold_carat && selectedItem.weight && (
+          {/* Show Base Gold Price for gold items - Only for non-cashiers */}
+          {selectedItem && selectedItem.gold_carat && selectedItem.weight && !userRole.toLowerCase().includes('cashier') && (
             <div className="flex items-center">
               <div className="w-32 font-medium">Base Gold Price (per unit)</div>
               <div className="flex-1">
@@ -1419,12 +1781,15 @@ const AddSalePage = () => {
                 onChange={(e) => {
                   const value = parseFloat(e.target.value);
                   if (!isNaN(value) && value >= 0) {
-                    // For percentage, limit to 75%
-                    if (discountType === 'percentage' && value > 75) {
-                      setError('Maximum discount allowed is 75%');
-                      setDiscountAmount(75);
+                    // Get maximum discount percentage based on user role
+                    const maxDiscountPercentage = getMaxDiscountPercentage();
+
+                    // For percentage, limit to the maximum allowed for this user role
+                    if (discountType === 'percentage' && value > maxDiscountPercentage) {
+                      setError(`Maximum discount allowed is ${maxDiscountPercentage}%`);
+                      setDiscountAmount(maxDiscountPercentage);
                     } else if (discountType === 'fixed' && selectedItem) {
-                      // For fixed amount, limit to 75% of the price
+                      // For fixed amount, limit to the maximum percentage of the price
                       // Use baseGoldPricePerUnit if available, otherwise use custom price or selling price
                       let basePrice;
 
@@ -1450,9 +1815,12 @@ const AddSalePage = () => {
                         basePrice = selectedItem.selling_price;
                       }
 
-                      const maxDiscount = basePrice * 0.75;
+                      // Calculate maximum discount amount based on user role percentage
+                      const maxDiscountPercentage = getMaxDiscountPercentage();
+                      const maxDiscount = basePrice * (maxDiscountPercentage / 100);
+
                       if (value > maxDiscount) {
-                        setError(`Maximum discount allowed is ${formatCurrency(maxDiscount)}`);
+                        setError(`Maximum discount allowed is ${formatCurrency(maxDiscount)} (${maxDiscountPercentage}%)`);
                         setDiscountAmount(maxDiscount);
                       } else {
                         setDiscountAmount(value);
@@ -1476,9 +1844,13 @@ const AddSalePage = () => {
                 onChange={(e) => setDiscountType(e.target.value as 'percentage' | 'fixed')}
                 disabled={!selectedItem}
               >
-                <option value="fixed">₹</option>
+                <option value="fixed">Rs.</option>
                 <option value="percentage">%</option>
               </select>
+            </div>
+            {/* Display maximum discount allowed based on user role */}
+            <div className="text-xs text-gray-500 mt-1 ml-32">
+              Maximum discount allowed: {getMaxDiscountPercentage()}%
             </div>
           </div>
 

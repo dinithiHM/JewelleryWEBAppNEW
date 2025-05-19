@@ -245,7 +245,20 @@ const ViewSalesPage = () => {
   };
 
   // Calculate total sales amount
-  const totalSalesAmount = filteredSales.reduce((sum, sale) => sum + sale.total_amount, 0);
+  const totalSalesAmount = filteredSales.reduce((sum, sale) => {
+    // Ensure total_amount is a number
+    const amount = typeof sale.total_amount === 'string'
+      ? parseFloat(sale.total_amount)
+      : sale.total_amount;
+
+    // Log each sale amount for debugging
+    console.log(`Sale ID: ${sale.sale_id}, Amount: ${amount}, Running Total: ${sum + amount}`);
+
+    return sum + amount;
+  }, 0);
+
+  // Log the final total
+  console.log('Total Sales Amount:', totalSalesAmount);
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -330,7 +343,7 @@ const ViewSalesPage = () => {
         <div className="bg-gray-100 p-4 rounded-md mb-6">
           <div className="flex justify-between items-center">
             <div>
-              <h3 className="font-bold">Total Sales</h3>
+              <h3 className="font-bold">Total Sales Amount</h3>
               <p className="text-2xl font-bold">{formatCurrency(totalSalesAmount)}</p>
             </div>
             <div>

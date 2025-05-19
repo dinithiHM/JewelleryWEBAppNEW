@@ -28,7 +28,7 @@ const Featured = () => {
               <p className="p-4 2xl:p-8">
                 <DynamicText text={item.desc || ""} />
               </p>
-              <span className="text-xl font-bold">Rs{item.price}</span>
+              {item.price && <span className="text-xl font-bold">Rs. {item.price}</span>}
 
             </div>
           </div>

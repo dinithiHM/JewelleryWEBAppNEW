@@ -19,9 +19,9 @@ const CountChart = () => {
   // Use language context to trigger re-renders when language changes
   useLanguage();
   const [data, setData] = useState([
-    { name: "Total", count: 0, fill: "#F7CFD8" },
-    { name: "Mahiyangana", count: 0, fill: "#AA60C8" },
-    { name: "Mahaoya", count: 0, fill: "#BE5985" },
+    { name: "Total", count: 0, fill: "#F5F5DC" }, // Beige/light gold
+    { name: "Mahiyangana", count: 0, fill: "#D4AF37" }, // Metallic gold
+    { name: "Mahaoya", count: 0, fill: "#CFB53B" }, // Old gold
   ]);
 
   useEffect(() => {
@@ -52,9 +52,9 @@ const CountChart = () => {
         // Update the data state with the fetched counts
         const totalCount = users.length;
         setData([
-          { name: "Total", count: totalCount, fill: "#F7CFD8" },
-          { name: "Mahiyangana", count: mahiyanganaCount, fill: "#AA60C8" },
-          { name: "Mahaoya", count: mahaoyaCount, fill: "#BE5985" },
+          { name: "Total", count: totalCount, fill: "#F5F5DC" }, // Beige/light gold
+          { name: "Mahiyangana", count: mahiyanganaCount, fill: "#D4AF37" }, // Metallic gold
+          { name: "Mahaoya", count: mahaoyaCount, fill: "#CFB53B" }, // Old gold
         ]);
       } catch (error) {
         console.error("Error fetching employee data:", error);
@@ -87,17 +87,17 @@ const CountChart = () => {
             <RadialBar background dataKey="count" />
           </RadialBarChart>
         </ResponsiveContainer>
-      
+
       </div>
       {/* BOTTOM */}
       <div className="flex justify-center gap-16">
         <div className="flex flex-col gap-1">
-          <div className="w-5 h-5 bg-[#BE5985] rounded-full" />
+          <div className="w-5 h-5 bg-[#D4AF37] rounded-full" />
           <h1 className="font-bold">{data[1]?.count}</h1>
           <h2 className="text-xs text-bold-black">Mahiyangana Branch ({Math.round((data[1]?.count / data[0]?.count) * 100)}%)</h2>
         </div>
         <div className="flex flex-col gap-1">
-          <div className="w-5 h-5 bg-[#AA60C8] rounded-full" />
+          <div className="w-5 h-5 bg-[#CFB53B] rounded-full" />
           <h1 className="font-bold">{data[2]?.count}</h1>
           <h2 className="text-xs text-bold-black">MahaOya Branch({Math.round((data[2]?.count / data[0]?.count) * 100)}%)</h2>
         </div>

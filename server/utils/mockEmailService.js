@@ -1,6 +1,6 @@
 /**
  * Mock Email Service
- * 
+ *
  * This is a development replacement for the real email service when nodemailer is not available.
  * It logs email details to the console instead of actually sending emails.
  */
@@ -15,10 +15,10 @@ export const sendEmail = async (options) => {
   if (options.bcc) console.log('BCC:', options.bcc);
   if (options.attachments) console.log('Attachments:', options.attachments.length);
   console.log('=========================\n');
-  
+
   // Always return success for testing
-  return { 
-    success: true, 
+  return {
+    success: true,
     messageId: `mock-email-${Date.now()}`,
     mockEmail: true
   };
@@ -32,7 +32,7 @@ export const sendEmail = async (options) => {
  */
 export const sendOrderConfirmation = async (order, customerEmail) => {
   console.log(`MOCK EMAIL: Sending order confirmation to ${customerEmail} for order #${order.order_id}`);
-  
+
   return sendEmail({
     to: customerEmail,
     subject: `Order Confirmation #${order.order_id}`,
@@ -49,7 +49,7 @@ export const sendOrderConfirmation = async (order, customerEmail) => {
  */
 export const sendPaymentReceipt = async (payment, order, customerEmail) => {
   console.log(`MOCK EMAIL: Sending payment receipt to ${customerEmail} for order #${order.order_id}`);
-  
+
   return sendEmail({
     to: customerEmail,
     subject: `Payment Receipt for Order #${order.order_id}`,
@@ -66,7 +66,7 @@ export const sendPaymentReceipt = async (payment, order, customerEmail) => {
  */
 export const sendOrderStatusUpdate = async (order, customerEmail, newStatus) => {
   console.log(`MOCK EMAIL: Sending status update to ${customerEmail} for order #${order.order_id} - New status: ${newStatus}`);
-  
+
   return sendEmail({
     to: customerEmail,
     subject: `Order Status Update for Order #${order.order_id}`,
@@ -82,12 +82,20 @@ export const sendOrderStatusUpdate = async (order, customerEmail, newStatus) => 
  */
 export const sendCustomOrderPaymentReminder = async (order, customerEmail) => {
   console.log(`MOCK EMAIL: Sending payment reminder to ${customerEmail} for custom order #${order.order_id}`);
-  
-  // Calculate remaining balance
-  const totalAmount = Number(order.estimated_amount) || 0;
+
+  // Calculate total amount with profit and quantity
+  const baseAmount = Number(order.estimated_amount) || 0;
+  const profitPercentage = Number(order.profit_percentage) || 0;
+  const quantity = Number(order.quantity) || 1;
+
+  // Calculate total amount with profit and quantity
+  const totalAmount = profitPercentage > 0
+    ? (baseAmount * (1 + profitPercentage/100) * quantity)
+    : (baseAmount * quantity);
+
   const paidAmount = Number(order.advance_amount) || 0;
   const remainingBalance = totalAmount - paidAmount;
-  
+
   return sendEmail({
     to: customerEmail,
     subject: `Payment Reminder for Custom Order #${order.order_id}`,

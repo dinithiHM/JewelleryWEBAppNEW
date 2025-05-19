@@ -19,8 +19,79 @@ interface PaymentRecord {
   created_by?: number;
 }
 
+interface OrderItem {
+  order_item_id: number;
+  order_id: number;
+  category: string;
+  quantity: number;
+  offer_gold: number;
+  selected_karats: string;
+  karat_values: string;
+  design_image?: string;
+  design_image_url?: string;
+  status: string;
+  gold_price_per_gram?: number;
+  weight_in_grams?: number;
+  making_charges?: number;
+  additional_materials_charges?: number;
+  base_estimated_price?: number;
+  estimated_price?: number;
+  total_amount?: number;
+  selectedKarat?: string;
+  goldPurity?: number;
+  offered_gold_value?: number;
+  created_at: string;
+  updated_at?: string;
+}
+
+interface Order {
+  order_id: number;
+  category: string;
+  supplier_id: string;
+  quantity: number;
+  offer_gold: number;
+  selected_karats: string;
+  karat_values: string;
+  design_image: string | null;
+  design_image_url?: string;
+  status: string;
+  created_at: string;
+  updated_at?: string;
+  branch_id?: number;
+  branch_name?: string;
+  created_by?: number;
+  store_manager_name?: string;
+
+  // Gold and pricing details
+  gold_price_per_gram?: number;
+  selectedKarat?: string;
+  goldPurity?: number;
+  weight_in_grams?: number;
+  making_charges?: number;
+  additional_materials_charges?: number;
+  base_estimated_price?: number;
+  estimated_price?: number;
+  total_amount?: number;
+  useCustomPrice?: boolean;
+  use_custom_estimate?: boolean;
+
+  // Payment details
+  advance_payment_amount?: number;
+  total_payment_amount?: number;
+  payment_status?: string;
+  payment_method?: string;
+  payment_notes?: string;
+
+  // Payment history
+  payment_history?: PaymentRecord[];
+
+  // Order items
+  items?: OrderItem[];
+  itemsCount?: number;
+}
+
 interface OrderDetailsModalProps {
-  order: any;
+  order: Order;
   supplierName: string;
   supplierPhone?: string;
   createdByName?: string;
@@ -32,6 +103,7 @@ const OrderDetailsModal = ({ order, supplierName, supplierPhone = 'Not available
   const [paymentHistory, setPaymentHistory] = useState<PaymentRecord[]>([]);
   const [loadingPayments, setLoadingPayments] = useState(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState(0); // For item tabs
 
   // Parse JSON strings if needed
   const selectedKarats = order.selected_karats ?
@@ -238,118 +310,7 @@ const OrderDetailsModal = ({ order, supplierName, supplierPhone = 'Not available
             </div>
           </div>
 
-          {/* Gold and Pricing Information */}
-          <div className="mb-6">
-            <h3 className="text-lg font-semibold mb-4">Gold & Pricing Details</h3>
 
-            <div className="bg-gray-50 rounded-lg p-4">
-              {/* Gold Karat Information */}
-              <div className="mb-4">
-                <h4 className="text-md font-medium mb-2">Gold Specifications</h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-sm text-gray-500">Gold Karat</p>
-                    <p className="font-medium">
-                      {order.selectedKarat || (order.selected_karats && typeof order.selected_karats === 'string' &&
-                        JSON.parse(order.selected_karats).length > 0 ?
-                        JSON.parse(order.selected_karats)[0].replace('KT', 'K') : 'N/A')}
-                    </p>
-                  </div>
-
-                  <div>
-                    <p className="text-sm text-gray-500">Gold Purity</p>
-                    <p className="font-medium">
-                      {order.goldPurity ?
-                        `${(order.goldPurity * 100).toFixed(2)}%` :
-                        (order.selectedKarat ?
-                          `${(parseInt(order.selectedKarat.replace(/[^\d]/g, ''), 10) / 24 * 100).toFixed(2)}%` :
-                          'N/A')}
-                    </p>
-                  </div>
-
-                  <div>
-                    <p className="text-sm text-gray-500">Gold Price (per gram)</p>
-                    <p className="font-medium">
-                      {order.gold_price_per_gram ? `Rs. ${Number(order.gold_price_per_gram).toLocaleString()}` : 'N/A'}
-                    </p>
-                  </div>
-
-                  <div>
-                    <p className="text-sm text-gray-500">Weight (g)</p>
-                    <p className="font-medium">
-                      {order.weight_in_grams ? `${Number(order.weight_in_grams).toLocaleString()} g` : 'N/A'}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Selected Karats (if gold is provided) */}
-              {order.offer_gold === 1 && selectedKarats.length > 0 && (
-                <div className="mb-4">
-                  <h4 className="text-md font-medium mb-2">Selected Karats</h4>
-                  <div className="flex flex-wrap gap-2">
-                    {selectedKarats.map((karat: string, index: number) => (
-                      <span key={index} className="px-2 py-1 bg-white border border-gray-200 rounded text-sm">
-                        {karat} ({karatValues[karat] || 0}g)
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Pricing Breakdown */}
-              <div>
-                <h4 className="text-md font-medium mb-2">Price Breakdown</h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-sm text-gray-500">Base Gold Price</p>
-                    <p className="font-medium">
-                      {order.base_estimated_price ? `Rs. ${Number(order.base_estimated_price).toLocaleString()}` : 'N/A'}
-                    </p>
-                    <p className="text-xs text-gray-500">Gold price × weight</p>
-                  </div>
-
-                  <div>
-                    <p className="text-sm text-gray-500">Making Charges</p>
-                    <p className="font-medium">
-                      {order.making_charges ? `Rs. ${Number(order.making_charges).toLocaleString()}` : 'N/A'}
-                    </p>
-                  </div>
-
-                  <div>
-                    <p className="text-sm text-gray-500">Additional Materials Charges</p>
-                    <p className="font-medium">
-                      {order.additional_materials_charges ? `Rs. ${Number(order.additional_materials_charges).toLocaleString()}` : 'N/A'}
-                    </p>
-                    <p className="text-xs text-gray-500">For copper, other metals</p>
-                  </div>
-
-                  <div>
-                    <p className="text-sm text-gray-500">
-                      {order.use_custom_estimate ? 'Custom Estimate Price' : 'Total Estimate Price'}
-                    </p>
-                    <p className="font-medium">
-                      {order.estimated_price ? `Rs. ${Number(order.estimated_price).toLocaleString()}` : 'N/A'}
-                    </p>
-                    {order.use_custom_estimate && (
-                      <p className="text-xs text-green-600">(Custom price set by staff)</p>
-                    )}
-                  </div>
-
-                  <div className="md:col-span-2">
-                    <p className="text-sm text-gray-500">Total Order Amount</p>
-                    <p className="font-medium text-yellow-700">
-                      {order.total_amount ? `Rs. ${Number(order.total_amount).toLocaleString()}` : 'N/A'}
-                    </p>
-                    <p className="text-xs text-gray-500">
-                      {order.quantity} {order.quantity === 1 ? 'unit' : 'units'} ×
-                      {order.estimated_price ? ` Rs. ${Number(order.estimated_price).toLocaleString()}` : ''}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
 
           {/* Payment Information */}
           <div className="mb-6">
@@ -466,23 +427,217 @@ const OrderDetailsModal = ({ order, supplierName, supplierPhone = 'Not available
             )}
           </div>
 
-          {/* Design Image */}
-          {order.design_image_url && (
-            <div className="mt-6">
-              <h3 className="text-lg font-semibold mb-4">Design Image</h3>
-              <div className="flex justify-center">
-                <div className="relative w-64 h-64 border border-gray-200 rounded-lg overflow-hidden">
-                  <DynamicImage
-                    src={order.design_image_url}
-                    alt={`Design for order #${order.order_id}`}
-                    fill
-                    style={{ objectFit: 'contain' }}
-                    className="p-2"
-                  />
+          {/* Order Items Tabs */}
+          <div className="mb-6">
+            <h3 className="text-lg font-semibold mb-4">Order Items</h3>
+
+            {order.items && order.items.length > 0 ? (
+              <div>
+                {/* Tabs Navigation */}
+                <div className="border-b border-gray-200">
+                  <nav className="flex -mb-px overflow-x-auto">
+                    {order.items.map((item: any, index: number) => (
+                      <button
+                        key={item.order_item_id || index}
+                        className={`whitespace-nowrap py-2 px-4 border-b-2 font-medium text-sm ${
+                          index === activeTab
+                            ? 'border-yellow-500 text-yellow-600'
+                            : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                        }`}
+                        onClick={() => setActiveTab(index)}
+                      >
+                        Item #{index + 1} - {item.category}
+                      </button>
+                    ))}
+                  </nav>
+                </div>
+
+                {/* Tab Content */}
+                {order.items.map((item: any, index: number) => (
+                  <div
+                    key={item.order_item_id || index}
+                    className={`mt-4 ${index === activeTab ? 'block' : 'hidden'}`}
+                  >
+                    <div className="bg-gray-50 rounded-lg p-4">
+                      {/* Item Details */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                        <div>
+                          <p className="text-sm text-gray-500">Category</p>
+                          <p className="font-medium">{item.category}</p>
+                        </div>
+                        <div>
+                          <p className="text-sm text-gray-500">Quantity</p>
+                          <p className="font-medium">{item.quantity}</p>
+                        </div>
+                        <div>
+                          <p className="text-sm text-gray-500">Status</p>
+                          <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full
+                            ${item.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
+                              item.status === 'completed' ? 'bg-green-100 text-green-800' :
+                              item.status === 'cancelled' ? 'bg-red-100 text-red-800' :
+                              'bg-blue-100 text-blue-800'}`}
+                          >
+                            {item.status ? item.status.charAt(0).toUpperCase() + item.status.slice(1) : 'N/A'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Gold Specifications */}
+                      <div className="mb-4">
+                        <h4 className="text-md font-medium mb-2">Gold Specifications</h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <p className="text-sm text-gray-500">Gold Karat</p>
+                            <p className="font-medium">
+                              {item.selectedKarat || (item.selected_karats && typeof item.selected_karats === 'string' &&
+                                JSON.parse(item.selected_karats).length > 0 ?
+                                JSON.parse(item.selected_karats)[0].replace('KT', 'K') : 'N/A')}
+                            </p>
+                          </div>
+
+                          <div>
+                            <p className="text-sm text-gray-500">Gold Purity</p>
+                            <p className="font-medium">
+                              {item.goldPurity ?
+                                `${(item.goldPurity * 100).toFixed(2)}%` :
+                                (item.selectedKarat ?
+                                  `${(parseInt(item.selectedKarat.replace(/[^\d]/g, ''), 10) / 24 * 100).toFixed(2)}%` :
+                                  'N/A')}
+                            </p>
+                          </div>
+
+                          <div>
+                            <p className="text-sm text-gray-500">Gold Price (per gram)</p>
+                            <p className="font-medium">
+                              {item.gold_price_per_gram ? `Rs. ${Number(item.gold_price_per_gram).toLocaleString()}` : 'N/A'}
+                            </p>
+                          </div>
+
+                          <div>
+                            <p className="text-sm text-gray-500">Weight (g)</p>
+                            <p className="font-medium">
+                              {item.weight_in_grams ? `${Number(item.weight_in_grams).toLocaleString()} g` : 'N/A'}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Selected Karats (if gold is provided) */}
+                      {item.offer_gold === 1 && item.selected_karats && (
+                        <div className="mb-4">
+                          <h4 className="text-md font-medium mb-2">Selected Karats</h4>
+                          <div className="flex flex-wrap gap-2">
+                            {(typeof item.selected_karats === 'string' ?
+                              JSON.parse(item.selected_karats) :
+                              item.selected_karats).map((karat: string, idx: number) => (
+                              <span key={idx} className="px-2 py-1 bg-white border border-gray-200 rounded text-sm">
+                                {karat} ({item.karat_values && typeof item.karat_values === 'string' ?
+                                  (JSON.parse(item.karat_values)[karat] || 0) : 0}g)
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Price Breakdown */}
+                      <div>
+                        <h4 className="text-md font-medium mb-2">Price Breakdown</h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <p className="text-sm text-gray-500">Base Gold Price</p>
+                            <p className="font-medium">
+                              {item.base_estimated_price ? `Rs. ${Number(item.base_estimated_price).toLocaleString()}` : 'N/A'}
+                            </p>
+                            <p className="text-xs text-gray-500">Gold price × weight</p>
+                          </div>
+
+                          <div>
+                            <p className="text-sm text-gray-500">Making Charges</p>
+                            <p className="font-medium">
+                              {item.making_charges ? `Rs. ${Number(item.making_charges).toLocaleString()}` : 'N/A'}
+                            </p>
+                          </div>
+
+                          <div>
+                            <p className="text-sm text-gray-500">Additional Materials Charges</p>
+                            <p className="font-medium">
+                              {item.additional_materials_charges ? `Rs. ${Number(item.additional_materials_charges).toLocaleString()}` : 'N/A'}
+                            </p>
+                            <p className="text-xs text-gray-500">For copper, other metals</p>
+                          </div>
+
+                          <div>
+                            <p className="text-sm text-gray-500">
+                              {item.use_custom_estimate ? 'Custom Estimate Price' : 'Total Estimate Price'}
+                            </p>
+                            <p className="font-medium">
+                              {item.estimated_price ? `Rs. ${Number(item.estimated_price).toLocaleString()}` : 'N/A'}
+                            </p>
+                            {item.use_custom_estimate && (
+                              <p className="text-xs text-green-600">(Custom price set by staff)</p>
+                            )}
+                          </div>
+
+                          <div className="md:col-span-2">
+                            <p className="text-sm text-gray-500">Total Item Amount</p>
+                            <p className="font-medium text-yellow-700">
+                              {item.total_amount ? `Rs. ${Number(item.total_amount).toLocaleString()}` : 'N/A'}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              {item.quantity} {item.quantity === 1 ? 'unit' : 'units'} ×
+                              {item.estimated_price ? ` Rs. ${Number(item.estimated_price).toLocaleString()}` : ''}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Item Design Image */}
+                      {item.design_image_url && (
+                        <div className="mt-4">
+                          <h4 className="text-md font-medium mb-2">Design Image</h4>
+                          <div className="flex justify-center">
+                            <div className="relative w-64 h-64 border border-gray-200 rounded-lg overflow-hidden">
+                              <DynamicImage
+                                src={item.design_image_url}
+                                alt={`Design for item #${index + 1}`}
+                                fill
+                                style={{ objectFit: 'contain' }}
+                                className="p-2"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="bg-gray-50 rounded-lg p-4 text-center text-gray-500">
+                No items found for this order.
+              </div>
+            )}
+          </div>
+
+          {/* Order Total Amount */}
+          <div className="mb-6">
+            <h3 className="text-lg font-semibold mb-4">Order Total</h3>
+            <div className="bg-gray-50 rounded-lg p-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="md:col-span-2">
+                  <p className="text-sm text-gray-500">Total Order Amount</p>
+                  <p className="font-medium text-yellow-700 text-xl">
+                    {order.total_amount ? `Rs. ${Number(order.total_amount).toLocaleString()}` : 'N/A'}
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    Total for all {order.items?.length || 0} items in this order
+                  </p>
                 </div>
               </div>
             </div>
-          )}
+          </div>
+
+
         </div>
 
         {/* Footer */}

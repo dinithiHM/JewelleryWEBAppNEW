@@ -17,7 +17,9 @@ import {
   X,
   Printer,
   RefreshCw,
-  Send
+  Send,
+  Percent,
+  Hash
 } from 'lucide-react';
 import { formatCurrency } from '@/utils/formatters';
 import LKRIcon from '@/components/LKRIcon';
@@ -40,8 +42,11 @@ interface CustomOrderDetail {
   description: string | null;
   special_requirements: string | null;
   estimated_amount: number;
+  profit_percentage?: number;
   advance_amount: number;
   balance_amount: number;
+  total_amount_with_profit?: number;
+  balance_with_profit?: number;
   branch_id: number;
   branch_name: string;
   created_by_id: number;
@@ -56,6 +61,7 @@ interface CustomOrderDetail {
     upload_date: string;
   }[];
   isFromOtherBranch?: boolean; // Added for branch visibility feature
+  quantity?: number; // Added for quantity-based pricing
 }
 
 const CustomOrderDetailPage = ({ params }: { params: Promise<{ id: string }> | { id: string } }) => {
@@ -135,13 +141,29 @@ const CustomOrderDetailPage = ({ params }: { params: Promise<{ id: string }> | {
 
         if (imagesList.length > 0) {
           // Create imageDetails array from images string
-          data.imageDetails = imagesList.map((imagePath: string, index: number) => ({
-            image_id: index + 1,
-            order_id: data.order_id,
-            image_path: imagePath,
-            image_type: 'Reference',
-            upload_date: data.order_date
-          }));
+          data.imageDetails = imagesList.map((imagePath: string, index: number) => {
+            // Clean up the path to ensure it's just the filename
+            let cleanPath = imagePath;
+            if (cleanPath.includes('/')) {
+              cleanPath = cleanPath.split('/').pop() || cleanPath;
+            }
+            if (cleanPath.startsWith('uploads/')) {
+              cleanPath = cleanPath.replace('uploads/', '');
+            }
+            if (cleanPath.startsWith('custom_orders/')) {
+              cleanPath = cleanPath.replace('custom_orders/', '');
+            }
+
+            console.log(`Original path: ${imagePath}, Clean path: ${cleanPath}`);
+
+            return {
+              image_id: index + 1,
+              order_id: data.order_id,
+              image_path: cleanPath,
+              image_type: 'Reference',
+              upload_date: data.order_date
+            };
+          });
           console.log('Created imageDetails:', data.imageDetails);
         }
       }
@@ -172,13 +194,37 @@ const CustomOrderDetailPage = ({ params }: { params: Promise<{ id: string }> | {
 
       // Set the first image as selected if available
       if (data.imageDetails && data.imageDetails.length > 0) {
-        setSelectedImage(data.imageDetails[0].image_path);
-        console.log('Selected image:', data.imageDetails[0].image_path);
+        // Clean up the path to ensure it's just the filename
+        let cleanPath = data.imageDetails[0].image_path;
+        if (cleanPath.includes('/')) {
+          cleanPath = cleanPath.split('/').pop() || cleanPath;
+        }
+        if (cleanPath.startsWith('uploads/')) {
+          cleanPath = cleanPath.replace('uploads/', '');
+        }
+        if (cleanPath.startsWith('custom_orders/')) {
+          cleanPath = cleanPath.replace('custom_orders/', '');
+        }
+
+        setSelectedImage(cleanPath);
+        console.log('Selected image:', cleanPath, 'Original:', data.imageDetails[0].image_path);
       } else if (data.images) {
         const imagesList = data.images.split(',').filter((img: string) => img.trim());
         if (imagesList.length > 0) {
-          setSelectedImage(imagesList[0]);
-          console.log('Selected image from string:', imagesList[0]);
+          // Clean up the path to ensure it's just the filename
+          let cleanPath = imagesList[0];
+          if (cleanPath.includes('/')) {
+            cleanPath = cleanPath.split('/').pop() || cleanPath;
+          }
+          if (cleanPath.startsWith('uploads/')) {
+            cleanPath = cleanPath.replace('uploads/', '');
+          }
+          if (cleanPath.startsWith('custom_orders/')) {
+            cleanPath = cleanPath.replace('custom_orders/', '');
+          }
+
+          setSelectedImage(cleanPath);
+          console.log('Selected image from string:', cleanPath, 'Original:', imagesList[0]);
         }
       }
     } catch (err) {
@@ -352,7 +398,20 @@ const CustomOrderDetailPage = ({ params }: { params: Promise<{ id: string }> | {
 
   // Handle image selection
   const handleImageSelect = (imagePath: string) => {
-    setSelectedImage(imagePath);
+    // Clean up the path to ensure it's just the filename
+    let cleanPath = imagePath;
+    if (cleanPath.includes('/')) {
+      cleanPath = cleanPath.split('/').pop() || cleanPath;
+    }
+    if (cleanPath.startsWith('uploads/')) {
+      cleanPath = cleanPath.replace('uploads/', '');
+    }
+    if (cleanPath.startsWith('custom_orders/')) {
+      cleanPath = cleanPath.replace('custom_orders/', '');
+    }
+
+    setSelectedImage(cleanPath);
+    console.log('Selected image:', cleanPath, 'Original:', imagePath);
   };
 
   if (loading) {
@@ -543,6 +602,15 @@ const CustomOrderDetailPage = ({ params }: { params: Promise<{ id: string }> | {
                   <p className="text-sm text-gray-900">{`${order.created_by_first_name} ${order.created_by_last_name}`}</p>
                 </div>
               </div>
+              {order.quantity && order.quantity > 0 && (
+                <div className="flex items-start">
+                  <Hash className="h-5 w-5 text-gray-400 mr-2 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-gray-500">Quantity</p>
+                    <p className="text-sm text-gray-900">{order.quantity}</p>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -574,13 +642,67 @@ const CustomOrderDetailPage = ({ params }: { params: Promise<{ id: string }> | {
               Last updated: {lastRefreshed.toLocaleTimeString()}
             </div>
             <div className="space-y-3">
-              <div className="flex items-start">
-                <LKRIcon className="h-5 w-5 text-gray-400 mr-2 mt-0.5" />
-                <div>
-                  <p className="text-sm font-medium text-gray-500">Total Amount</p>
-                  <p className="text-sm font-semibold text-gray-900">{formatCurrency(order.estimated_amount)}</p>
+              {/* Show different information based on user role */}
+              {userRole === 'supplier' ? (
+                // Supplier only sees the estimated amount (without profit)
+                <div className="flex items-start">
+                  <LKRIcon className="h-5 w-5 text-gray-400 mr-2 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-gray-500">Estimated Amount</p>
+                    <p className="text-sm font-semibold text-gray-900">{formatCurrency(order.estimated_amount)}</p>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                // Other users see the total amount with profit
+                <>
+                  {order.profit_percentage !== undefined && (
+                    <div className="flex items-start">
+                      <LKRIcon className="h-5 w-5 text-gray-400 mr-2 mt-0.5" />
+                      <div>
+                        <p className="text-sm font-medium text-gray-500">Supplier Cost</p>
+                        <p className="text-sm text-gray-900">{formatCurrency(order.estimated_amount * (order.quantity || 1))}</p>
+                        {order.quantity && order.quantity > 1 && (
+                          <p className="text-xs text-gray-500">
+                            {formatCurrency(order.estimated_amount)} × {order.quantity} items
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {order.profit_percentage !== undefined && (
+                    <div className="flex items-start">
+                      <Percent className="h-5 w-5 text-gray-400 mr-2 mt-0.5" />
+                      <div>
+                        <p className="text-sm font-medium text-gray-500">Profit Percentage</p>
+                        <p className="text-sm text-gray-900">{order.profit_percentage}%</p>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex items-start">
+                    <LKRIcon className="h-5 w-5 text-gray-400 mr-2 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium text-gray-500">Total Amount (Customer Price)</p>
+                      <p className="text-sm font-semibold text-gray-900">
+                        {formatCurrency(
+                          order.total_amount_with_profit !== undefined
+                            ? order.total_amount_with_profit
+                            : (order.profit_percentage !== undefined
+                                ? ((order.estimated_amount * (order.profit_percentage / 100)) + order.estimated_amount) * (order.quantity || 1)
+                                : order.estimated_amount * (order.quantity || 1))
+                        )}
+                      </p>
+                      {order.profit_percentage !== undefined && (
+                        <p className="text-xs text-gray-500">
+                          Includes {order.profit_percentage}% profit: {formatCurrency(order.estimated_amount * (order.profit_percentage / 100))} × {order.quantity || 1} items
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+
               <div className="flex items-start">
                 <LKRIcon className="h-5 w-5 text-gray-400 mr-2 mt-0.5" />
                 <div>
@@ -588,11 +710,28 @@ const CustomOrderDetailPage = ({ params }: { params: Promise<{ id: string }> | {
                   <p className="text-sm font-semibold text-green-600">{formatCurrency(order.advance_amount)}</p>
                 </div>
               </div>
+
               <div className="flex items-start">
                 <LKRIcon className="h-5 w-5 text-gray-400 mr-2 mt-0.5" />
                 <div>
                   <p className="text-sm font-medium text-gray-500">Balance</p>
-                  <p className="text-sm font-semibold text-red-600">{formatCurrency(order.balance_amount)}</p>
+                  <p className="text-sm font-semibold text-red-600">
+                    {formatCurrency(
+                      (() => {
+                        // Calculate the total amount with profit
+                        const totalAmount = order.total_amount_with_profit !== undefined
+                          ? order.total_amount_with_profit
+                          : (order.profit_percentage !== undefined
+                              ? ((order.estimated_amount * (1 + order.profit_percentage / 100)) * (order.quantity || 1))
+                              : (order.estimated_amount * (order.quantity || 1)));
+
+                        // Calculate the balance (total amount - advance payment)
+                        return userRole === 'supplier'
+                          ? order.balance_amount
+                          : totalAmount - order.advance_amount;
+                      })()
+                    )}
+                  </p>
                 </div>
               </div>
 
@@ -607,24 +746,60 @@ const CustomOrderDetailPage = ({ params }: { params: Promise<{ id: string }> | {
                   <p className="text-sm font-medium text-gray-500">Payment Status</p>
                   <div className="mt-1">
                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                      order.balance_amount <= 0
-                        ? 'bg-green-100 text-green-800'
-                        : order.advance_amount > 0
-                          ? 'bg-yellow-100 text-yellow-800'
-                          : 'bg-red-100 text-red-800'
+                      (() => {
+                        // Calculate the total amount with profit
+                        const totalAmount = order.total_amount_with_profit !== undefined
+                          ? order.total_amount_with_profit
+                          : (order.profit_percentage !== undefined
+                              ? ((order.estimated_amount * (1 + order.profit_percentage / 100)) * (order.quantity || 1))
+                              : (order.estimated_amount * (order.quantity || 1)));
+
+                        // Calculate the balance (total amount - advance payment)
+                        const balance = totalAmount - order.advance_amount;
+
+                        return balance <= 0
+                          ? 'bg-green-100 text-green-800'
+                          : order.advance_amount > 0
+                            ? 'bg-yellow-100 text-yellow-800'
+                            : 'bg-red-100 text-red-800';
+                      })()
                     }`}>
-                      {order.balance_amount <= 0
-                        ? 'Fully Paid'
-                        : order.advance_amount > 0
-                          ? 'Partially Paid'
-                          : 'Unpaid'}
+                      {(() => {
+                        // Calculate the total amount with profit
+                        const totalAmount = order.total_amount_with_profit !== undefined
+                          ? order.total_amount_with_profit
+                          : (order.profit_percentage !== undefined
+                              ? ((order.estimated_amount * (1 + order.profit_percentage / 100)) * (order.quantity || 1))
+                              : (order.estimated_amount * (order.quantity || 1)));
+
+                        // Calculate the balance (total amount - advance payment)
+                        const balance = totalAmount - order.advance_amount;
+
+                        return balance <= 0
+                          ? 'Fully Paid'
+                          : order.advance_amount > 0
+                            ? 'Partially Paid'
+                            : 'Unpaid';
+                      })()}
                     </span>
                   </div>
                 </div>
               </div>
 
               {/* Payment Reminder Button - Only show if there's a balance and customer email */}
-              {order.balance_amount > 0 && order.customer_email && (
+              {(() => {
+                // Calculate the total amount with profit
+                const totalAmount = order.total_amount_with_profit !== undefined
+                  ? order.total_amount_with_profit
+                  : (order.profit_percentage !== undefined
+                      ? ((order.estimated_amount * (1 + order.profit_percentage / 100)) * (order.quantity || 1))
+                      : (order.estimated_amount * (order.quantity || 1)));
+
+                // Calculate the balance (total amount - advance payment)
+                const balance = totalAmount - order.advance_amount;
+
+                return balance > 0 && order.customer_email;
+              })() && (
                 <div className="mt-4">
                   <button
                     onClick={handleSendReminder}
@@ -666,7 +841,19 @@ const CustomOrderDetailPage = ({ params }: { params: Promise<{ id: string }> | {
               )}
 
               {/* Show message if customer email is missing */}
-              {order.balance_amount > 0 && !order.customer_email && (
+              {(() => {
+                // Calculate the total amount with profit
+                const totalAmount = order.total_amount_with_profit !== undefined
+                  ? order.total_amount_with_profit
+                  : (order.profit_percentage !== undefined
+                      ? ((order.estimated_amount * (1 + order.profit_percentage / 100)) * (order.quantity || 1))
+                      : (order.estimated_amount * (order.quantity || 1)));
+
+                // Calculate the balance (total amount - advance payment)
+                const balance = totalAmount - order.advance_amount;
+
+                return balance > 0 && !order.customer_email;
+              })() && (
                 <div className="mt-4 p-2 bg-yellow-100 border border-yellow-400 text-yellow-700 rounded-md text-sm">
                   <AlertCircle className="h-4 w-4 inline-block mr-1" />
                   Cannot send reminder: Customer email is not available
@@ -684,38 +871,57 @@ const CustomOrderDetailPage = ({ params }: { params: Promise<{ id: string }> | {
               <h2 className="text-lg font-semibold mb-4">Design Images</h2>
 
               {/* Main selected image */}
-              <div className="mb-4 flex justify-center">
-                <div className="relative w-full max-w-md h-64 bg-gray-200 rounded-md overflow-hidden">
-                  {selectedImage && (
+              {selectedImage && (
+                <div className="mb-4 flex justify-center">
+                  <div className="relative w-full max-w-md h-80 bg-gray-100 rounded-lg overflow-hidden shadow-md">
                     <Image
-                      src={`http://localhost:3002/uploads/${selectedImage}`}
+                      src={`http://localhost:3002/uploads/custom_orders/${selectedImage}`}
                       alt="Selected design"
                       fill
                       style={{ objectFit: 'contain' }}
-                    />
-                  )}
-                </div>
-              </div>
-
-              {/* Thumbnails */}
-              <div className="grid grid-cols-4 gap-2">
-                {order.imageDetails.map((image) => (
-                  <div
-                    key={image.image_id}
-                    className={`relative h-20 bg-gray-200 rounded-md overflow-hidden cursor-pointer ${
-                      selectedImage === image.image_path ? 'ring-2 ring-yellow-500' : ''
-                    }`}
-                    onClick={() => handleImageSelect(image.image_path)}
-                  >
-                    <Image
-                      src={`http://localhost:3002/uploads/${image.image_path}`}
-                      alt="Design thumbnail"
-                      fill
-                      style={{ objectFit: 'cover' }}
+                      className="p-2"
+                      onError={(e) => {
+                        console.error('Error loading image:', e);
+                        // Try alternative path if the first one fails
+                        const imgElement = e.target as HTMLImageElement;
+                        if (!imgElement.src.includes('?retry=true')) {
+                          imgElement.src = `${imgElement.src}?retry=true`;
+                        }
+                      }}
                     />
                   </div>
-                ))}
-              </div>
+                </div>
+              )}
+
+              {/* Thumbnails - only show if there are multiple images */}
+              {order.imageDetails.length > 1 && (
+                <div className="grid grid-cols-4 gap-2">
+                  {order.imageDetails.map((image) => (
+                    <div
+                      key={image.image_id}
+                      className={`relative h-20 bg-gray-200 rounded-md overflow-hidden cursor-pointer ${
+                        selectedImage === image.image_path ? 'ring-2 ring-yellow-500' : ''
+                      }`}
+                      onClick={() => handleImageSelect(image.image_path)}
+                    >
+                      <Image
+                        src={`http://localhost:3002/uploads/custom_orders/${image.image_path}`}
+                        alt="Design thumbnail"
+                        fill
+                        style={{ objectFit: 'cover' }}
+                        onError={(e) => {
+                          console.error('Error loading thumbnail:', e);
+                          // Try alternative path if the first one fails
+                          const imgElement = e.target as HTMLImageElement;
+                          if (!imgElement.src.includes('?retry=true')) {
+                            imgElement.src = `${imgElement.src}?retry=true`;
+                          }
+                        }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 

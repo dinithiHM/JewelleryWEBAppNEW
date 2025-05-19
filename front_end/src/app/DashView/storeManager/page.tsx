@@ -1,9 +1,8 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { BarChart, Users, ShoppingCart, Tag, Coins, Store, Package, TrendingUp, AlertTriangle, Clock, CheckCircle, AlertCircle, Mail, Calendar, Plus, ArrowRight } from 'lucide-react';
+import { ShoppingCart, Store, Package, AlertTriangle, Clock, CheckCircle, AlertCircle, Mail, Calendar, Plus, ArrowRight, Filter, CheckSquare, Clipboard } from 'lucide-react';
 import { useLanguage } from "@/contexts/LanguageContext";
-import TranslatedText from "@/components/TranslatedText";
 import { useRouter } from 'next/navigation';
 
 // Define types for advance payments
@@ -41,18 +40,45 @@ interface PaymentRecord {
   created_by?: number;
 }
 
-interface Order {
+// Define types for order items
+interface OrderItem {
+  order_item_id?: number;
   order_id: number;
   category: string;
-  supplier_id: string;
   quantity: number;
   offer_gold: number;
   selected_karats: string;
   karat_values: string;
-  design_image: string | null;
+  design_image?: string | null;
   design_image_url?: string;
   status: string;
+  gold_price_per_gram?: number;
+  weight_in_grams?: number;
+  making_charges?: number;
+  additional_materials_charges?: number;
+  base_estimated_price?: number;
+  estimated_price?: number;
+  total_amount?: number;
+  selectedKarat?: string;
+  goldPurity?: number;
+  offered_gold_value?: number;
   created_at: string;
+  updated_at?: string;
+  supplier_notes?: string;
+}
+
+interface Order {
+  order_id: number;
+  category?: string;
+  supplier_id: string;
+  quantity?: number;
+  offer_gold?: number;
+  selected_karats?: string;
+  karat_values?: string;
+  design_image?: string | null;
+  design_image_url?: string;
+  status?: string;
+  created_at?: string;
   branch_id?: number;
   branch_name?: string;
   created_by?: number;
@@ -79,6 +105,10 @@ interface Order {
 
   // Payment history
   payment_history?: PaymentRecord[];
+
+  // Order items
+  items?: OrderItem[];
+  itemsCount?: number;
 }
 
 const StoreManagerDashboard = () => {
@@ -97,10 +127,57 @@ const StoreManagerDashboard = () => {
   const [emailSuccess, setEmailSuccess] = useState<string | null>(null);
   const [emailError, setEmailError] = useState<string | null>(null);
 
-  // State for completed orders
+  // State for sorting and filtering
+  const [sortOption, setSortOption] = useState<string>('overdue');
+  const [filterOption, setFilterOption] = useState<string>('all');
+  const [showFilters, setShowFilters] = useState<boolean>(false);
+
+  // Define types for custom orders
+interface CustomOrder {
+  order_id: number;
+  order_reference: string;
+  customer_name: string;
+  customer_phone: string;
+  customer_email: string;
+  order_date: string;
+  estimated_completion_date: string;
+  estimated_amount: number;
+  advance_amount: number;
+  balance_amount: number;
+  order_status: string;
+  payment_status: string;
+  category_id: number;
+  category_name: string;
+  supplier_id: number;
+  supplier_name: string;
+  description: string;
+  branch_id: number;
+  branch_name: string;
+  pickup_date?: string;
+  pickup_notes?: string;
+}
+
+// State for completed orders
   const [completedOrders, setCompletedOrders] = useState<Order[]>([]);
   const [loadingOrders, setLoadingOrders] = useState<boolean>(true);
   const [orderError, setOrderError] = useState<string | null>(null);
+
+// State for completed custom orders
+  const [completedCustomOrders, setCompletedCustomOrders] = useState<CustomOrder[]>([]);
+  const [loadingCustomOrders, setLoadingCustomOrders] = useState<boolean>(true);
+  const [customOrderError, setCustomOrderError] = useState<string | null>(null);
+  const [sendingNotification, setSendingNotification] = useState<boolean>(false);
+  const [notificationSuccess, setNotificationSuccess] = useState<string | null>(null);
+  const [notificationError, setNotificationError] = useState<string | null>(null);
+  const [showPickedUpOrders, setShowPickedUpOrders] = useState<boolean>(false);
+
+  // State for marking orders as picked up
+  const [markingAsPickedUp, setMarkingAsPickedUp] = useState<boolean>(false);
+  const [pickupSuccess, setPickupSuccess] = useState<string | null>(null);
+  const [pickupError, setPickupError] = useState<string | null>(null);
+  const [showPickupModal, setShowPickupModal] = useState<boolean>(false);
+  const [selectedOrderForPickup, setSelectedOrderForPickup] = useState<CustomOrder | null>(null);
+  const [pickupNotes, setPickupNotes] = useState<string>('');
 
   // State for supplier liabilities
   interface SupplierLiability {
@@ -121,6 +198,12 @@ const StoreManagerDashboard = () => {
   const [loadingSuppliers, setLoadingSuppliers] = useState<boolean>(true);
   const [supplierError, setSupplierError] = useState<string | null>(null);
   const [supplierSearchTerm, setSupplierSearchTerm] = useState<string>('');
+
+  // State for dashboard cards
+  const [todaySales, setTodaySales] = useState<string>("LKR 0");
+  const [inventoryCount, setInventoryCount] = useState<string>("0");
+  const [lowStockCount, setLowStockCount] = useState<string>("0");
+  const [loadingDashboardCounts, setLoadingDashboardCounts] = useState<boolean>(true);
 
   // Branch mapping function
   const getBranchNameById = (id: string | null): string => {
@@ -151,6 +234,65 @@ const StoreManagerDashboard = () => {
     const diffTime = Math.abs(now.getTime() - date.getTime());
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     return diffDays > 10;
+  };
+
+  // Check if a payment is due today
+  const isDueToday = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    return date.toDateString() === now.toDateString();
+  };
+
+  // Check if a payment is due this week
+  const isDueThisWeek = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffTime = Math.abs(now.getTime() - date.getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays <= 7;
+  };
+
+  // Sort and filter outstanding payments
+  const getSortedAndFilteredPayments = () => {
+    // Apply filter
+    let filtered = [...outstandingPayments];
+
+    if (filterOption === 'overdue') {
+      filtered = filtered.filter(payment => isOlderThan10Days(payment.payment_date));
+    } else if (filterOption === 'today') {
+      filtered = filtered.filter(payment => isDueToday(payment.payment_date));
+    } else if (filterOption === 'this-week') {
+      filtered = filtered.filter(payment => isDueThisWeek(payment.payment_date));
+    }
+
+    // Apply sorting
+    if (sortOption === 'overdue') {
+      // Sort by overdue first, then by date (oldest first)
+      filtered.sort((a, b) => {
+        const aIsOverdue = isOlderThan10Days(a.payment_date);
+        const bIsOverdue = isOlderThan10Days(b.payment_date);
+
+        if (aIsOverdue && !bIsOverdue) return -1;
+        if (!aIsOverdue && bIsOverdue) return 1;
+
+        // If both are overdue or both are not overdue, sort by date (oldest first)
+        return new Date(a.payment_date).getTime() - new Date(b.payment_date).getTime();
+      });
+    } else if (sortOption === 'amount-high') {
+      // Sort by balance amount (highest first)
+      filtered.sort((a, b) => b.balance_amount - a.balance_amount);
+    } else if (sortOption === 'amount-low') {
+      // Sort by balance amount (lowest first)
+      filtered.sort((a, b) => a.balance_amount - b.balance_amount);
+    } else if (sortOption === 'date-new') {
+      // Sort by date (newest first)
+      filtered.sort((a, b) => new Date(b.payment_date).getTime() - new Date(a.payment_date).getTime());
+    } else if (sortOption === 'date-old') {
+      // Sort by date (oldest first)
+      filtered.sort((a, b) => new Date(a.payment_date).getTime() - new Date(b.payment_date).getTime());
+    }
+
+    return filtered;
   };
 
   // Get status icon
@@ -233,6 +375,12 @@ const StoreManagerDashboard = () => {
     }
   };
 
+  // State for email modal
+  const [showEmailModal, setShowEmailModal] = useState<boolean>(false);
+  const [selectedPaymentForEmail, setSelectedPaymentForEmail] = useState<AdvancePayment | null>(null);
+  const [emailInput, setEmailInput] = useState<string>('');
+  const [updatingEmail, setUpdatingEmail] = useState<boolean>(false);
+
   // Send payment reminder email
   const sendPaymentReminder = async (payment: AdvancePayment) => {
     setSendingEmail(true);
@@ -246,7 +394,7 @@ const StoreManagerDashboard = () => {
         // For custom orders
         endpoint = `http://localhost:3002/custom-orders/${payment.order_id}/send-reminder`;
       } else {
-        // For inventory items, we'll need to create a new endpoint or use a generic one
+        // For inventory items
         endpoint = `http://localhost:3002/advance-payments/${payment.payment_id}/send-reminder`;
       }
 
@@ -265,13 +413,83 @@ const StoreManagerDashboard = () => {
         // Auto-hide success message after 5 seconds
         setTimeout(() => setEmailSuccess(null), 5000);
       } else {
-        setEmailError(data.message || 'Failed to send payment reminder');
+        // If the error is about missing email, show the email input modal
+        if (data.message && data.message.includes('Customer email is not available')) {
+          setSelectedPaymentForEmail(payment);
+          setShowEmailModal(true);
+          setEmailInput('');
+        } else {
+          setEmailError(data.message || 'Failed to send payment reminder');
+        }
       }
     } catch (err) {
       console.error('Error sending payment reminder:', err);
       setEmailError(err instanceof Error ? err.message : 'An error occurred while sending the reminder');
     } finally {
       setSendingEmail(false);
+    }
+  };
+
+  // Update customer email and then send reminder
+  const updateEmailAndSendReminder = async () => {
+    if (!selectedPaymentForEmail || !emailInput || !emailInput.includes('@')) {
+      setEmailError('Please enter a valid email address');
+      return;
+    }
+
+    setUpdatingEmail(true);
+    setEmailError(null);
+
+    try {
+      // First update the email
+      const updateResponse = await fetch(`http://localhost:3002/advance-payments/${selectedPaymentForEmail.payment_id}/update-email`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ customer_email: emailInput })
+      });
+
+      const updateData = await updateResponse.json();
+
+      if (updateResponse.ok && updateData.success) {
+        // Now send the reminder
+        const reminderResponse = await fetch(`http://localhost:3002/advance-payments/${selectedPaymentForEmail.payment_id}/send-reminder`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        });
+
+        const reminderData = await reminderResponse.json();
+
+        if (reminderResponse.ok && reminderData.success) {
+          setEmailSuccess(`Email updated and payment reminder sent to ${selectedPaymentForEmail.customer_name}`);
+
+          // Update the payment in the state with the new email
+          const updatedPayments = outstandingPayments.map(p =>
+            p.payment_id === selectedPaymentForEmail.payment_id
+              ? { ...p, customer_email: emailInput }
+              : p
+          );
+          setOutstandingPayments(updatedPayments);
+
+          // Close the modal
+          setShowEmailModal(false);
+
+          // Auto-hide success message after 5 seconds
+          setTimeout(() => setEmailSuccess(null), 5000);
+        } else {
+          setEmailError(reminderData.message || 'Failed to send payment reminder');
+        }
+      } else {
+        setEmailError(updateData.message || 'Failed to update email address');
+      }
+    } catch (err) {
+      console.error('Error updating email and sending reminder:', err);
+      setEmailError(err instanceof Error ? err.message : 'An error occurred');
+    } finally {
+      setUpdatingEmail(false);
     }
   };
 
@@ -384,6 +602,56 @@ const StoreManagerDashboard = () => {
     return false;
   });
 
+  // Fetch dashboard counts
+  const fetchDashboardCounts = async (branchId: string) => {
+    setLoadingDashboardCounts(true);
+
+    try {
+      // Construct URL with query parameters for branch filtering
+      let url = 'http://localhost:3002/dashboard-counts/all';
+      const params = new URLSearchParams();
+
+      // Filter by branch
+      if (branchId) {
+        params.append('branch_id', branchId);
+      }
+
+      // Add the parameters to the URL
+      if (params.toString()) {
+        url += `?${params.toString()}`;
+      }
+
+      console.log('Fetching dashboard counts from:', url);
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch dashboard counts: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log('Received dashboard counts:', data);
+
+      // Update state with the fetched data
+      if (data.todaysales) {
+        const formattedSales = `LKR ${Number(data.todaysales.total_amount).toLocaleString()}`;
+        setTodaySales(formattedSales);
+      }
+
+      if (data.jewelleryitem) {
+        // Use total_stock instead of count for inventory items
+        setInventoryCount(data.jewelleryitem.total_stock.toString());
+      }
+
+      if (data.lowstock) {
+        setLowStockCount(data.lowstock.count.toString());
+      }
+    } catch (err) {
+      console.error('Error fetching dashboard counts:', err);
+    } finally {
+      setLoadingDashboardCounts(false);
+    }
+  };
+
   // Fetch completed orders
   const fetchCompletedOrders = async (branchId: string) => {
     setLoadingOrders(true);
@@ -391,7 +659,7 @@ const StoreManagerDashboard = () => {
 
     try {
       // Construct URL with query parameters for branch filtering
-      let url = 'http://localhost:3002/orders';
+      let url = 'http://localhost:3002/orders/completed-items';
       const params = new URLSearchParams();
 
       // Set role parameter (store manager)
@@ -400,110 +668,82 @@ const StoreManagerDashboard = () => {
       // Filter by branch
       params.append('branch_id', branchId);
 
-      // Filter by status (completed) - make sure this parameter is correctly handled by the backend
-      params.append('status', 'completed');
-
       // Add the parameters to the URL
       url += `?${params.toString()}`;
 
-      console.log('Fetching completed orders with status filter:', url);
-
-      console.log('Fetching completed orders from:', url);
+      console.log('Fetching completed order items from:', url);
       const response = await fetch(url);
 
       if (!response.ok) {
-        throw new Error(`Failed to fetch completed orders: ${response.status}`);
+        throw new Error(`Failed to fetch completed order items: ${response.status}`);
       }
 
       const data = await response.json();
 
       // Log the data for debugging
-      console.log('Received completed orders:', data);
+      console.log('Received completed order items:', data);
 
-      // Process the data
-      const processedOrders = data.map((order: Order) => {
-        // Process image URL if needed
-        if (order.design_image) {
-          const imagePath = order.design_image.startsWith('uploads/')
-            ? order.design_image
-            : `uploads/${order.design_image}`;
-
-          order.design_image_url = `http://localhost:3002/${imagePath}`;
-        }
-
-        // Process selected karats if needed
-        if (order.selected_karats && typeof order.selected_karats === 'string') {
-          try {
-            const selectedKarats = JSON.parse(order.selected_karats);
-            if (selectedKarats && selectedKarats.length > 0) {
-              // Use the first karat as the selectedKarat if not already set
-              if (!order.selectedKarat) {
-                order.selectedKarat = selectedKarats[0];
-              }
-            }
-          } catch (e) {
-            console.error('Error parsing selected_karats:', e);
-          }
-        }
-
-        // Ensure numeric values are properly converted to numbers
-        if (order.weight_in_grams) {
-          order.weight_in_grams = Number(order.weight_in_grams);
-        }
-
-        if (order.estimated_price) {
-          order.estimated_price = Number(order.estimated_price);
-        }
-
-        if (order.quantity) {
-          order.quantity = Number(order.quantity);
-        }
-
-        return order;
-      });
-
-      setCompletedOrders(processedOrders);
+      // The data is already processed by the server into orders with items
+      setCompletedOrders(data);
     } catch (err) {
-      console.error('Error fetching completed orders:', err);
-      setOrderError(err instanceof Error ? err.message : 'An error occurred while fetching orders');
+      console.error('Error fetching completed order items:', err);
+      setOrderError(err instanceof Error ? err.message : 'An error occurred while fetching order items');
 
       // Use dummy data for development
       setCompletedOrders([
         {
           order_id: 1,
-          category: 'Wedding Sets',
           supplier_id: '001',
-          quantity: Number(5),
-          offer_gold: 1,
-          selected_karats: JSON.stringify(['24KT']),
-          karat_values: JSON.stringify({ '24KT': 50 }),
-          design_image: null,
-          status: 'completed',
-          created_at: new Date().toISOString(),
-          gold_price_per_gram: Number(31771.17),
-          selectedKarat: '24KT',
-          weight_in_grams: Number(15.5),
-          making_charges: Number(25000),
-          estimated_price: Number(525953.14),
-          total_amount: Number(2629765.70)
+          branch_id: 1,
+          branch_name: 'Mahiyanganaya Branch',
+          items: [
+            {
+              order_item_id: 1,
+              order_id: 1,
+              category: 'Wedding Sets',
+              quantity: 5,
+              offer_gold: 1,
+              selected_karats: JSON.stringify(['24KT']),
+              karat_values: JSON.stringify({ '24KT': 50 }),
+              design_image: null,
+              status: 'completed',
+              gold_price_per_gram: 31771.17,
+              selectedKarat: '24KT',
+              weight_in_grams: 15.5,
+              making_charges: 25000,
+              estimated_price: 525953.14,
+              total_amount: 2629765.70,
+              created_at: new Date().toISOString()
+            }
+          ],
+          itemsCount: 1
         },
         {
           order_id: 2,
-          category: 'Rings',
           supplier_id: '002',
-          quantity: Number(10),
-          offer_gold: 1,
-          selected_karats: JSON.stringify(['22KT']),
-          karat_values: JSON.stringify({ '22KT': 40 }),
-          design_image: null,
-          status: 'completed',
-          created_at: new Date(Date.now() - 86400000).toISOString(),
-          gold_price_per_gram: Number(29125.24),
-          selectedKarat: '22KT',
-          weight_in_grams: Number(8.2),
-          making_charges: Number(12000),
-          estimated_price: Number(254326.97),
-          total_amount: Number(2543269.70)
+          branch_id: 1,
+          branch_name: 'Mahiyanganaya Branch',
+          items: [
+            {
+              order_item_id: 2,
+              order_id: 2,
+              category: 'Rings',
+              quantity: 10,
+              offer_gold: 1,
+              selected_karats: JSON.stringify(['22KT']),
+              karat_values: JSON.stringify({ '22KT': 40 }),
+              design_image: null,
+              status: 'completed',
+              gold_price_per_gram: 29125.24,
+              selectedKarat: '22KT',
+              weight_in_grams: 8.2,
+              making_charges: 12000,
+              estimated_price: 254326.97,
+              total_amount: 2543269.70,
+              created_at: new Date(Date.now() - 86400000).toISOString()
+            }
+          ],
+          itemsCount: 1
         }
       ]);
     } finally {
@@ -511,54 +751,309 @@ const StoreManagerDashboard = () => {
     }
   };
 
-  // Handle adding to stock
-  const handleAddToStock = async (order: Order) => {
-    // First, update the order status to "added_to_stock"
+  // Fetch completed custom orders
+  const fetchCompletedCustomOrders = async (branchId: string, includePickedUp: boolean = false) => {
+    setLoadingCustomOrders(true);
+    setCustomOrderError(null);
+
     try {
-      const response = await fetch(`http://localhost:3002/orders/update-status/${order.order_id}`, {
+      // Start building query parameters
+      const params = new URLSearchParams();
+
+      // Add branch filter if provided
+      if (branchId) {
+        params.append('branch_id', branchId);
+      }
+
+      // Add option to include picked up orders
+      if (includePickedUp) {
+        params.append('include_picked_up', 'true');
+      }
+
+      // Construct URL with query parameters
+      const url = `http://localhost:3002/custom-orders/completed-orders?${params.toString()}`;
+
+      console.log('Fetching completed custom orders from:', url);
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch completed custom orders: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // Log the data for debugging
+      console.log('Received completed custom orders:', data);
+
+      // Process the data to ensure numeric values
+      const processedOrders = data.map((order: CustomOrder) => {
+        return {
+          ...order,
+          estimated_amount: Number(order.estimated_amount),
+          advance_amount: Number(order.advance_amount),
+          balance_amount: Number(order.balance_amount),
+          category_id: Number(order.category_id),
+          supplier_id: Number(order.supplier_id),
+          branch_id: Number(order.branch_id)
+        };
+      });
+
+      setCompletedCustomOrders(processedOrders);
+    } catch (err) {
+      console.error('Error fetching completed custom orders:', err);
+      setCustomOrderError(err instanceof Error ? err.message : 'An error occurred while fetching custom orders');
+
+      // Use dummy data for development
+      setCompletedCustomOrders([
+        {
+          order_id: 101,
+          order_reference: 'CUST-2023-0001',
+          customer_name: 'John Smith',
+          customer_phone: '0771234567',
+          customer_email: 'john@example.com',
+          order_date: new Date().toISOString(),
+          estimated_completion_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+          estimated_amount: 150000,
+          advance_amount: 50000,
+          balance_amount: 100000,
+          order_status: 'Completed',
+          payment_status: 'Partially Paid',
+          category_id: 1,
+          category_name: 'Rings',
+          supplier_id: 1,
+          supplier_name: 'Mohamad Nazeem',
+          description: 'Custom gold ring with diamond',
+          branch_id: 1,
+          branch_name: 'Mahiyanganaya Branch'
+        },
+        {
+          order_id: 102,
+          order_reference: 'CUST-2023-0002',
+          customer_name: 'Sarah Johnson',
+          customer_phone: '0777654321',
+          customer_email: 'sarah@example.com',
+          order_date: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
+          estimated_completion_date: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
+          estimated_amount: 250000,
+          advance_amount: 250000,
+          balance_amount: 0,
+          order_status: 'Completed',
+          payment_status: 'Fully Paid',
+          category_id: 2,
+          category_name: 'Necklaces',
+          supplier_id: 2,
+          supplier_name: 'Abdulla Nazeem',
+          description: 'Custom gold necklace with pendant',
+          branch_id: 1,
+          branch_name: 'Mahiyanganaya Branch'
+        }
+      ]);
+    } finally {
+      setLoadingCustomOrders(false);
+    }
+  };
+
+  // Send completion notification to customer
+  const sendCompletionNotification = async (order: CustomOrder) => {
+    setSendingNotification(true);
+    setNotificationSuccess(null);
+    setNotificationError(null);
+
+    try {
+      const response = await fetch(`http://localhost:3002/custom-orders/${order.order_id}/send-completion-notification`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          pickup_location: order.branch_name
+        })
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        setNotificationSuccess(`Notification sent to ${order.customer_name}`);
+
+        // Auto-hide success message after 5 seconds
+        setTimeout(() => setNotificationSuccess(null), 5000);
+      } else {
+        setNotificationError(data.message || 'Failed to send notification');
+      }
+    } catch (err) {
+      console.error('Error sending completion notification:', err);
+      setNotificationError(err instanceof Error ? err.message : 'An error occurred while sending the notification');
+    } finally {
+      setSendingNotification(false);
+    }
+  };
+
+  // Open the pickup modal for a specific order
+  const openPickupModal = (order: CustomOrder) => {
+    setSelectedOrderForPickup(order);
+    setPickupNotes('');
+    setPickupSuccess(null);
+    setPickupError(null);
+    setShowPickupModal(true);
+  };
+
+  // Mark an order as picked up
+  const markOrderAsPickedUp = async () => {
+    if (!selectedOrderForPickup) return;
+
+    setMarkingAsPickedUp(true);
+    setPickupSuccess(null);
+    setPickupError(null);
+
+    try {
+      const response = await fetch(`http://localhost:3002/custom-orders/${selectedOrderForPickup.order_id}/mark-as-picked-up`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ status: 'added_to_stock' })
+        body: JSON.stringify({
+          pickup_notes: pickupNotes
+        })
       });
 
-      if (!response.ok) {
-        console.error('Failed to update order status:', response.statusText);
-        // Continue with navigation even if status update fails
-      } else {
-        console.log(`Order #${order.order_id} status updated to 'added_to_stock'`);
+      const data = await response.json();
 
-        // Remove the order from the local state
-        setCompletedOrders(prevOrders =>
-          prevOrders.filter(o => o.order_id !== order.order_id)
+      if (response.ok && data.success) {
+        setPickupSuccess(`Order marked as picked up successfully`);
+
+        // Remove the order from the list of completed orders
+        setCompletedCustomOrders(prevOrders =>
+          prevOrders.filter(order => order.order_id !== selectedOrderForPickup.order_id)
         );
+
+        // Close the modal after a short delay
+        setTimeout(() => {
+          setShowPickupModal(false);
+          // Auto-hide success message after 5 seconds
+          setTimeout(() => setPickupSuccess(null), 5000);
+        }, 1500);
+      } else {
+        setPickupError(data.message || 'Failed to mark order as picked up');
       }
     } catch (err) {
-      console.error('Error updating order status:', err);
+      console.error('Error marking order as picked up:', err);
+      setPickupError(err instanceof Error ? err.message : 'An error occurred while updating the order');
+    } finally {
+      setMarkingAsPickedUp(false);
+    }
+  };
+
+  // Handle adding to stock
+  const handleAddToStock = async (order: Order & Partial<OrderItem>) => {
+    // Check if this is an order item (has order_item_id) or a regular order
+    const isOrderItem = !!order.order_item_id;
+
+    try {
+      let response;
+
+      if (isOrderItem) {
+        // Update the order item status to "added_to_stock"
+        response = await fetch(`http://localhost:3002/suppliers/update-order-item-status/${order.order_item_id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ status: 'added_to_stock' })
+        });
+      } else {
+        // Update the order status to "added_to_stock"
+        response = await fetch(`http://localhost:3002/orders/update-status/${order.order_id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ status: 'added_to_stock' })
+        });
+      }
+
+      if (!response.ok) {
+        console.error('Failed to update status:', response.statusText);
+        // Continue with navigation even if status update fails
+      } else {
+        console.log(`${isOrderItem ? `Order item #${order.order_item_id}` : `Order #${order.order_id}`} status updated to 'added_to_stock'`);
+
+        // Remove the order or order item from the local state
+        if (isOrderItem) {
+          // If it's an order item, update the items array for the parent order
+          setCompletedOrders(prevOrders =>
+            prevOrders.map(o => {
+              if (o.order_id === order.order_id && o.items) {
+                // Filter out the processed item
+                const updatedItems = o.items.filter(item => item.order_item_id !== order.order_item_id);
+
+                // If no items left, remove the whole order
+                if (updatedItems.length === 0) {
+                  return null;
+                }
+
+                // Otherwise, return the order with updated items
+                return { ...o, items: updatedItems, itemsCount: updatedItems.length };
+              }
+              return o;
+            }).filter(Boolean) as Order[] // Remove null entries
+          );
+        } else {
+          // If it's a regular order, remove it completely
+          setCompletedOrders(prevOrders =>
+            prevOrders.filter(o => o.order_id !== order.order_id)
+          );
+        }
+      }
+    } catch (err) {
+      console.error('Error updating status:', err);
       // Continue with navigation even if status update fails
     }
 
     // Create query parameters for auto-filling the form
     const params = new URLSearchParams();
 
-    // Map order fields to jewellery item fields
+    // Map order fields to jewellery item fields, preferring item fields if available
     if (order.category) params.append('category', order.category);
     if (order.quantity) params.append('in_stock', order.quantity.toString());
-    if (order.estimated_price) params.append('buying_price', order.estimated_price.toString());
-    if (order.selectedKarat) {
+
+    // Use the item's estimated price if available, otherwise use the order's
+    const estimatedPrice = isOrderItem && order.estimated_price
+      ? order.estimated_price
+      : order.estimated_price;
+    if (estimatedPrice) params.append('buying_price', estimatedPrice.toString());
+
+    // Use the item's selectedKarat if available, otherwise use the order's
+    const selectedKarat = isOrderItem && order.selectedKarat
+      ? order.selectedKarat
+      : order.selectedKarat;
+    if (selectedKarat) {
       // Remove "KT" suffix if present
-      const karat = order.selectedKarat.replace('KT', '');
+      const karat = selectedKarat.replace('KT', '');
       params.append('gold_carat', karat);
     }
-    if (order.weight_in_grams) params.append('weight', order.weight_in_grams.toString());
+
+    // Use the item's weight if available, otherwise use the order's
+    const weight = isOrderItem && order.weight_in_grams
+      ? order.weight_in_grams
+      : order.weight_in_grams;
+    if (weight) params.append('weight', weight.toString());
 
     // Add making charges and additional materials charges if they exist
-    if (order.making_charges) params.append('making_charges', order.making_charges.toString());
-    if (order.additional_materials_charges) params.append('additional_materials_charges', order.additional_materials_charges.toString());
+    const makingCharges = isOrderItem && order.making_charges
+      ? order.making_charges
+      : order.making_charges;
+    if (makingCharges) params.append('making_charges', makingCharges.toString());
 
-    // Add order ID to track which order this came from
+    const additionalCharges = isOrderItem && order.additional_materials_charges
+      ? order.additional_materials_charges
+      : order.additional_materials_charges;
+    if (additionalCharges) params.append('additional_materials_charges', additionalCharges.toString());
+
+    // Add order ID and item ID (if applicable) to track which order this came from
     params.append('order_id', order.order_id.toString());
+    if (isOrderItem && order.order_item_id) {
+      params.append('order_item_id', order.order_item_id.toString());
+    }
 
     // Navigate to jewellery-stock page with parameters
     router.push(`/DashView/jewellery-stock?${params.toString()}`);
@@ -598,6 +1093,9 @@ const StoreManagerDashboard = () => {
     if (storedBranchId) {
       setBranchId(storedBranchId);
 
+      // Fetch dashboard counts for this branch
+      fetchDashboardCounts(storedBranchId);
+
       // Fetch outstanding payments for this branch
       fetchOutstandingPayments(storedBranchId);
 
@@ -606,6 +1104,9 @@ const StoreManagerDashboard = () => {
 
       // Fetch completed orders for this branch
       fetchCompletedOrders(storedBranchId);
+
+      // Fetch completed custom orders for this branch
+      fetchCompletedCustomOrders(storedBranchId, showPickedUpOrders);
     }
   }, []);
 
@@ -615,7 +1116,7 @@ const StoreManagerDashboard = () => {
       <div className="flex justify-between items-center">
         <div>
           <h3 className="text-gray-500 text-sm font-medium">
-            <TranslatedText textKey={`dashboard.${title.toLowerCase().replace(/[^a-zA-Z0-9]/g, '')}`} fallback={title} />
+            {title}
           </h3>
           <p className="text-2xl font-bold mt-1">{value}</p>
         </div>
@@ -629,10 +1130,26 @@ const StoreManagerDashboard = () => {
   return (
     <div className="p-6">
       <div className="mb-8">
-        <h1 className="text-2xl font-bold text-gray-800">Store Manager Dashboard</h1>
-        <p className="text-gray-600 mt-1">
-          Welcome back{userName ? `, ${userName}` : ''}!
-        </p>
+        <div className="flex justify-between items-center">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-800">Store Manager Dashboard</h1>
+            <p className="text-gray-600 mt-1">
+              Welcome back{userName ? `, ${userName}` : ''}!
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              if (branchId) {
+                fetchDashboardCounts(branchId);
+              }
+            }}
+            className="px-3 py-1.5 bg-blue-50 text-blue-600 rounded-md flex items-center hover:bg-blue-100 transition-colors"
+            title="Refresh dashboard data"
+          >
+            <Clock className="mr-1" size={16} />
+            Refresh Data
+          </button>
+        </div>
 
         {/* Branch information - more prominent display */}
         <div className="mt-3 p-3 bg-blue-50 rounded-lg border border-blue-200 flex items-center">
@@ -652,20 +1169,20 @@ const StoreManagerDashboard = () => {
         <DashboardCard
           icon={ShoppingCart}
           title="Today's Sales"
-          value="LKR 124,500"
+          value={loadingDashboardCounts ? "Loading..." : todaySales}
           color="border-l-4 border-blue-500"
         />
 
         <DashboardCard
           icon={Package}
           title="Inventory Items"
-          value="1,245"
+          value={loadingDashboardCounts ? "Loading..." : inventoryCount}
           color="border-l-4 border-purple-500"
         />
         <DashboardCard
           icon={AlertTriangle}
           title="Low Stock Items"
-          value="12"
+          value={loadingDashboardCounts ? "Loading..." : lowStockCount}
           color="border-l-4 border-red-500"
         />
       </div>
@@ -673,15 +1190,76 @@ const StoreManagerDashboard = () => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
         <div className="bg-white p-6 rounded-lg shadow-md">
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-xl font-bold">Customers with Outstanding Payments</h2>
-            <button
-              onClick={() => fetchOutstandingPayments(branchId)}
-              className="text-blue-500 hover:text-blue-700 flex items-center"
-            >
-              <Clock className="mr-1" size={16} />
-              Refresh
-            </button>
+            <div className="flex items-center">
+              <h2 className="text-xl font-bold">Customers with Outstanding Payments</h2>
+              {!loadingPayments && outstandingPayments.filter(payment => isOlderThan10Days(payment.payment_date)).length > 0 && (
+                <span className="ml-2 px-2 py-0.5 text-xs font-medium bg-red-100 text-red-800 rounded-full">
+                  {outstandingPayments.filter(payment => isOlderThan10Days(payment.payment_date)).length} overdue
+                </span>
+              )}
+            </div>
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => setShowFilters(!showFilters)}
+                className="text-gray-600 hover:text-gray-800 flex items-center"
+                title="Filter options"
+              >
+                <Filter className="mr-1" size={16} />
+              </button>
+              <button
+                onClick={() => fetchOutstandingPayments(branchId)}
+                className="text-blue-500 hover:text-blue-700 flex items-center"
+              >
+                <Clock className="mr-1" size={16} />
+                Refresh
+              </button>
+            </div>
           </div>
+
+          {/* Sorting and filtering options */}
+          {showFilters && (
+            <div className="mb-4 p-3 bg-gray-50 border border-gray-200 rounded-md">
+              <div className="flex flex-col sm:flex-row justify-between gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Sort by</label>
+                  <select
+                    value={sortOption}
+                    onChange={(e) => setSortOption(e.target.value)}
+                    className="w-full sm:w-auto px-3 py-1.5 border border-gray-300 rounded-md text-sm"
+                  >
+                    <option value="overdue">Overdue first</option>
+                    <option value="amount-high">Amount (High to Low)</option>
+                    <option value="amount-low">Amount (Low to High)</option>
+                    <option value="date-new">Date (Newest first)</option>
+                    <option value="date-old">Date (Oldest first)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Filter</label>
+                  <select
+                    value={filterOption}
+                    onChange={(e) => setFilterOption(e.target.value)}
+                    className="w-full sm:w-auto px-3 py-1.5 border border-gray-300 rounded-md text-sm"
+                  >
+                    <option value="all">All payments</option>
+                    <option value="overdue">Overdue only</option>
+                    <option value="today">Due today</option>
+                    <option value="this-week">Due this week</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Display count of filtered payments */}
+              {!loadingPayments && (
+                <div className="mt-3 text-sm text-gray-600">
+                  Showing {getSortedAndFilteredPayments().length} of {outstandingPayments.length} payments
+                  {filterOption !== 'all' && (
+                    <span> ({filterOption === 'overdue' ? 'overdue' : filterOption === 'today' ? 'due today' : 'due this week'})</span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Email success/error messages */}
           {emailSuccess && (
@@ -711,7 +1289,7 @@ const StoreManagerDashboard = () => {
             </div>
           ) : (
             <div className="overflow-y-auto max-h-80">
-              {outstandingPayments.map((payment) => (
+              {getSortedAndFilteredPayments().map((payment) => (
                 <div
                   key={payment.payment_id}
                   className={`mb-3 p-3 border rounded-lg ${
@@ -737,9 +1315,19 @@ const StoreManagerDashboard = () => {
                       </div>
                       <div className="flex items-center text-sm mt-1">
                         <Calendar className="h-4 w-4 text-gray-400 mr-1" />
-                        <span className={isOlderThan10Days(payment.payment_date) ? 'text-red-600 font-medium' : ''}>
+                        <span className={
+                          isOlderThan10Days(payment.payment_date)
+                            ? 'text-red-600 font-medium'
+                            : isDueToday(payment.payment_date)
+                              ? 'text-orange-600 font-medium'
+                              : isDueThisWeek(payment.payment_date)
+                                ? 'text-yellow-600 font-medium'
+                                : ''
+                        }>
                           {formatDate(payment.payment_date)}
                           {isOlderThan10Days(payment.payment_date) && ' (Overdue)'}
+                          {isDueToday(payment.payment_date) && ' (Due Today)'}
+                          {!isOlderThan10Days(payment.payment_date) && !isDueToday(payment.payment_date) && isDueThisWeek(payment.payment_date) && ' (Due This Week)'}
                         </span>
                       </div>
                     </div>
@@ -889,27 +1477,76 @@ const StoreManagerDashboard = () => {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {completedOrders.map((order) => (
-                    <tr key={order.order_id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 whitespace-nowrap">#{order.order_id}</td>
-                      <td className="px-4 py-3 whitespace-nowrap">{order.category}</td>
-                      <td className="px-4 py-3 whitespace-nowrap">{order.quantity}</td>
-                      <td className="px-4 py-3 whitespace-nowrap">{order.selectedKarat || 'N/A'}</td>
-                      <td className="px-4 py-3 whitespace-nowrap">{order.weight_in_grams && typeof order.weight_in_grams === 'number' ? order.weight_in_grams.toFixed(2) : 'N/A'}</td>
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        {order.estimated_price && typeof order.estimated_price === 'number' ? `LKR ${order.estimated_price.toLocaleString()}` : 'N/A'}
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        <button
-                          onClick={() => handleAddToStock(order)}
-                          className="px-3 py-1 bg-green-100 text-green-800 rounded-md flex items-center text-sm hover:bg-green-200"
-                        >
-                          <Plus size={14} className="mr-1" />
-                          Add to Stock
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {completedOrders.map((order) => {
+                    // If order has items, render a row for each item
+                    if (order.items && order.items.length > 0) {
+                      return order.items.map((item, index) => (
+                        <tr key={`${order.order_id}-item-${item.order_item_id || index}`} className="hover:bg-gray-50">
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            #{order.order_id}{order.items && order.items.length > 1 ? `-${index + 1}` : ''}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            {item.category || order.category}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            {item.quantity || order.quantity}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            {item.selectedKarat || order.selectedKarat || 'N/A'}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            {item.weight_in_grams ? `${Number(item.weight_in_grams).toFixed(2)}` :
+                             order.weight_in_grams && typeof order.weight_in_grams === 'number' ? order.weight_in_grams.toFixed(2) : 'N/A'}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            {item.estimated_price ? `LKR ${Number(item.estimated_price).toLocaleString()}` :
+                             order.estimated_price && typeof order.estimated_price === 'number' ? `LKR ${order.estimated_price.toLocaleString()}` : 'N/A'}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <button
+                              onClick={() => handleAddToStock({
+                                ...order,
+                                ...item,
+                                design_image: item.design_image || order.design_image
+                              })}
+                              className="px-3 py-1 bg-green-100 text-green-800 rounded-md flex items-center text-sm hover:bg-green-200"
+                            >
+                              <Plus size={14} className="mr-1" />
+                              Add to Stock
+                            </button>
+                          </td>
+                        </tr>
+                      ));
+                    } else {
+                      // Render a single row for orders without items
+                      return (
+                        <tr key={order.order_id} className="hover:bg-gray-50">
+                          <td className="px-4 py-3 whitespace-nowrap">#{order.order_id}</td>
+                          <td className="px-4 py-3 whitespace-nowrap">{order.category}</td>
+                          <td className="px-4 py-3 whitespace-nowrap">{order.quantity}</td>
+                          <td className="px-4 py-3 whitespace-nowrap">{order.selectedKarat || 'N/A'}</td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            {order.weight_in_grams && typeof order.weight_in_grams === 'number' ? order.weight_in_grams.toFixed(2) : 'N/A'}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            {order.estimated_price && typeof order.estimated_price === 'number' ? `LKR ${order.estimated_price.toLocaleString()}` : 'N/A'}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <button
+                              onClick={() => handleAddToStock({
+                                ...order,
+                                design_image: order.design_image
+                              })}
+                              className="px-3 py-1 bg-green-100 text-green-800 rounded-md flex items-center text-sm hover:bg-green-200"
+                            >
+                              <Plus size={14} className="mr-1" />
+                              Add to Stock
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    }
+                  })}
                 </tbody>
               </table>
             </div>
@@ -917,27 +1554,264 @@ const StoreManagerDashboard = () => {
         </div>
 
         <div className="bg-white p-6 rounded-lg shadow-md">
-          <h2 className="text-xl font-bold mb-4">Quick Actions</h2>
-          <div className="grid grid-cols-2 gap-4">
-            <button className="p-4 bg-blue-50 rounded-lg flex flex-col items-center justify-center hover:bg-blue-100 transition duration-200">
-              <Store className="text-blue-500 mb-2" size={24} />
-              <span className="text-sm font-medium">Inventory</span>
-            </button>
-            <button className="p-4 bg-green-50 rounded-lg flex flex-col items-center justify-center hover:bg-green-100 transition duration-200">
-              <Users className="text-green-500 mb-2" size={24} />
-              <span className="text-sm font-medium">Staff</span>
-            </button>
-            <button className="p-4 bg-purple-50 rounded-lg flex flex-col items-center justify-center hover:bg-purple-100 transition duration-200">
-              <ShoppingCart className="text-purple-500 mb-2" size={24} />
-              <span className="text-sm font-medium">Sales</span>
-            </button>
-            <button className="p-4 bg-yellow-50 rounded-lg flex flex-col items-center justify-center hover:bg-yellow-100 transition duration-200">
-              <TrendingUp className="text-yellow-500 mb-2" size={24} />
-              <span className="text-sm font-medium">Reports</span>
-            </button>
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-xl font-bold">Completed Custom Orders</h2>
+            <div className="flex items-center space-x-3">
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  id="show-picked-up"
+                  checked={showPickedUpOrders}
+                  onChange={(e) => {
+                    setShowPickedUpOrders(e.target.checked);
+                    fetchCompletedCustomOrders(branchId, e.target.checked);
+                  }}
+                  className="mr-2 h-4 w-4 text-blue-600 rounded"
+                />
+                <label htmlFor="show-picked-up" className="text-sm text-gray-600">
+                  Show picked up
+                </label>
+              </div>
+              <button
+                onClick={() => fetchCompletedCustomOrders(branchId, showPickedUpOrders)}
+                className="text-blue-500 hover:text-blue-700 flex items-center"
+              >
+                <Clock className="mr-1" size={16} />
+                Refresh
+              </button>
+            </div>
           </div>
+
+          {/* Notification success/error messages */}
+          {notificationSuccess && (
+            <div className="mb-4 p-2 bg-green-100 border border-green-400 text-green-700 rounded">
+              {notificationSuccess}
+            </div>
+          )}
+
+          {notificationError && (
+            <div className="mb-4 p-2 bg-red-100 border border-red-400 text-red-700 rounded">
+              {notificationError}
+            </div>
+          )}
+
+          {/* Loading state */}
+          {loadingCustomOrders ? (
+            <div className="flex justify-center items-center p-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"></div>
+            </div>
+          ) : customOrderError ? (
+            <div className="p-4 text-center text-red-500">
+              Error loading data: {customOrderError}
+            </div>
+          ) : completedCustomOrders.length === 0 ? (
+            <div className="p-4 text-center text-gray-500">
+              No completed custom orders found.
+            </div>
+          ) : (
+            <div className="overflow-y-auto max-h-96">
+              {completedCustomOrders.map((order) => (
+                <div
+                  key={order.order_id}
+                  className={`mb-3 p-3 border rounded-lg ${
+                    order.order_status === 'Picked Up'
+                      ? 'border-purple-300 bg-purple-50'
+                      : order.payment_status === 'Fully Paid'
+                        ? 'border-green-300 bg-green-50'
+                        : 'border-yellow-300 bg-yellow-50'
+                  }`}
+                >
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <div className="font-medium">
+                        {order.customer_name}
+                      </div>
+                      <div className="text-sm text-gray-600">
+                        {order.order_reference || `Order #${order.order_id}`}
+                      </div>
+                      <div className="text-sm text-gray-600 mt-1">
+                        {order.category_name} - {order.description.substring(0, 30)}{order.description.length > 30 ? '...' : ''}
+                      </div>
+                      <div className="flex items-center text-sm mt-1">
+                        <Calendar className="h-4 w-4 text-gray-400 mr-1" />
+                        <span>
+                          Completed: {formatDate(order.order_date)}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="flex items-center justify-end space-x-2">
+                        <span className={`px-2 py-0.5 text-xs rounded-full ${
+                          order.payment_status === 'Fully Paid'
+                            ? 'bg-green-100 text-green-800'
+                            : 'bg-yellow-100 text-yellow-800'
+                        }`}>
+                          {order.payment_status}
+                        </span>
+                        {order.order_status === 'Picked Up' && (
+                          <span className="px-2 py-0.5 text-xs rounded-full bg-purple-100 text-purple-800">
+                            Picked Up {order.pickup_date && `(${formatDate(order.pickup_date)})`}
+                          </span>
+                        )}
+                      </div>
+                      {order.balance_amount > 0 && (
+                        <div className="text-sm font-bold mt-1 text-red-600">
+                          Balance: LKR {order.balance_amount.toLocaleString()}
+                        </div>
+                      )}
+                      <div className="flex flex-col space-y-2">
+                        <button
+                          onClick={() => sendCompletionNotification(order)}
+                          disabled={sendingNotification}
+                          className={`px-2 py-1 text-xs rounded flex items-center justify-center ${
+                            sendingNotification
+                              ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                              : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                          }`}
+                        >
+                          <Mail className="h-3 w-3 mr-1" />
+                          Send Email
+                        </button>
+
+                        {order.order_status !== 'Picked Up' && (
+                          <button
+                            onClick={() => openPickupModal(order)}
+                            className="px-2 py-1 text-xs rounded flex items-center justify-center bg-green-100 text-green-700 hover:bg-green-200"
+                          >
+                            <CheckSquare className="h-3 w-3 mr-1" />
+                            Mark as Picked Up
+                          </button>
+                        )}
+                        {order.order_status === 'Picked Up' && order.pickup_notes && (
+                          <button
+                            onClick={() => alert(`Pickup Notes: ${order.pickup_notes}`)}
+                            className="px-2 py-1 text-xs rounded flex items-center justify-center bg-gray-100 text-gray-700 hover:bg-gray-200"
+                          >
+                            <Clipboard className="h-3 w-3 mr-1" />
+                            View Notes
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
+
+      {/* Pickup Modal */}
+      {showPickupModal && selectedOrderForPickup && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-lg font-bold mb-4">Mark Order as Picked Up</h3>
+
+            {pickupSuccess && (
+              <div className="mb-4 p-2 bg-green-100 border border-green-400 text-green-700 rounded">
+                {pickupSuccess}
+              </div>
+            )}
+
+            {pickupError && (
+              <div className="mb-4 p-2 bg-red-100 border border-red-400 text-red-700 rounded">
+                {pickupError}
+              </div>
+            )}
+
+            <div className="mb-4">
+              <p className="font-medium">{selectedOrderForPickup.customer_name}</p>
+              <p className="text-sm text-gray-600">
+                {selectedOrderForPickup.order_reference || `Order #${selectedOrderForPickup.order_id}`}
+              </p>
+              <p className="text-sm text-gray-600 mt-1">
+                {selectedOrderForPickup.category_name}
+              </p>
+            </div>
+
+            <div className="mb-4">
+              <label htmlFor="pickup-notes" className="block text-sm font-medium text-gray-700 mb-1">
+                Pickup Notes (optional)
+              </label>
+              <textarea
+                id="pickup-notes"
+                rows={3}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                placeholder="Enter any notes about the pickup (e.g., picked up by family member)"
+                value={pickupNotes}
+                onChange={(e) => setPickupNotes(e.target.value)}
+              />
+            </div>
+
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={() => setShowPickupModal(false)}
+                className="px-4 py-2 border border-gray-300 rounded-md text-sm hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={markOrderAsPickedUp}
+                disabled={markingAsPickedUp}
+                className={`px-4 py-2 rounded-md text-sm text-white ${
+                  markingAsPickedUp
+                    ? 'bg-gray-400 cursor-not-allowed'
+                    : 'bg-green-600 hover:bg-green-700'
+                }`}
+              >
+                {markingAsPickedUp ? 'Processing...' : 'Confirm Pickup'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Email modal */}
+      {showEmailModal && selectedPaymentForEmail && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-lg font-bold mb-4">Add Customer Email</h3>
+
+            <div className="mb-4">
+              <p>To send a payment reminder to <strong>{selectedPaymentForEmail.customer_name}</strong>, please add their email address:</p>
+            </div>
+
+            <div className="mb-4">
+              <label htmlFor="customer-email" className="block text-sm font-medium text-gray-700 mb-1">
+                Customer Email
+              </label>
+              <input
+                type="email"
+                id="customer-email"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                value={emailInput}
+                onChange={(e) => setEmailInput(e.target.value)}
+                placeholder="customer@example.com"
+              />
+            </div>
+
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={() => setShowEmailModal(false)}
+                className="px-4 py-2 border border-gray-300 rounded-md text-sm hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={updateEmailAndSendReminder}
+                disabled={updatingEmail || !emailInput.includes('@')}
+                className={`px-4 py-2 rounded-md text-sm text-white ${
+                  updatingEmail || !emailInput.includes('@')
+                    ? 'bg-gray-400 cursor-not-allowed'
+                    : 'bg-blue-600 hover:bg-blue-700'
+                }`}
+              >
+                {updatingEmail ? 'Processing...' : 'Save & Send Reminder'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

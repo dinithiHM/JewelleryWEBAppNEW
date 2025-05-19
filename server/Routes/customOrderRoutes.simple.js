@@ -1,38 +1,50 @@
-import express from 'express';
-import con from '../utils/db.js';
-import { generateOrderReference } from '../utils/referenceGenerator.js';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+const express = require('express');
+const con = require('../utils/db.js');
+const { generateOrderReference } = require('../utils/referenceGenerator.js');
+const fs = require('fs');
+const path = require('path');
+const { fileURLToPath } = require('url');
 
 // Determine which email service to use (real or mock)
-let emailService;
-try {
-  // Force use of real email service since we know nodemailer is installed
-  console.log("Using real email service");
-  emailService = await import('../utils/emailService.js');
-} catch (e) {
-  console.error("Error importing email service:", e);
+let sendCustomOrderPaymentReminder = () => { throw new Error("Email service not initialized"); };
+let sendOrderStatusUpdate = () => { throw new Error("Email service not initialized"); };
 
-  // Fallback to mock service if there's an error
+// Use a regular promise instead of an IIFE with async/await
+Promise.resolve().then(() => {
+  let emailService;
   try {
-    console.log("Falling back to mock email service");
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = path.dirname(__filename);
-    const mockServicePath = path.join(__dirname, '..', 'utils', 'mockEmailService.js');
+    // Force use of real email service since we know nodemailer is installed
+    console.log("Using real email service");
+    return import('../utils/emailService.js');
+  } catch (e) {
+    console.error("Error importing email service:", e);
 
-    if (!fs.existsSync(mockServicePath)) {
-      console.log("Mock email service not found, please create it manually");
+    // Fallback to mock service if there's an error
+    try {
+      console.log("Falling back to mock email service");
+      const __filename = fileURLToPath(import.meta.url);
+      const __dirname = path.dirname(__filename);
+      const mockServicePath = path.join(__dirname, '..', 'utils', 'mockEmailService.js');
+
+      if (!fs.existsSync(mockServicePath)) {
+        console.log("Mock email service not found, please create it manually");
+      }
+
+      return import('../utils/mockEmailService.js');
+    } catch (mockError) {
+      console.error("Error importing mock email service:", mockError);
+      // If both fail, we'll get an error when trying to use sendCustomOrderPaymentReminder
+      return null;
     }
-
-    emailService = await import('../utils/mockEmailService.js');
-  } catch (mockError) {
-    console.error("Error importing mock email service:", mockError);
-    // If both fail, we'll get an error when trying to use sendCustomOrderPaymentReminder
   }
-}
-
-const { sendCustomOrderPaymentReminder } = emailService;
+}).then(emailService => {
+  if (emailService) {
+    sendCustomOrderPaymentReminder = emailService.sendCustomOrderPaymentReminder;
+    sendOrderStatusUpdate = emailService.sendOrderStatusUpdate;
+  }
+}).catch(err => {
+  console.error("Error initializing email service:", err);
+});
 
 const router = express.Router();
 
@@ -51,6 +63,8 @@ router.post("/create", (req, res) => {
     customer_phone,
     customer_email,
     estimated_amount,
+    profit_percentage,
+    quantity,
     advance_amount,
     estimated_completion_date,
     category_id,
@@ -72,6 +86,8 @@ router.post("/create", (req, res) => {
   console.log('customer_phone:', customer_phone);
   console.log('customer_email:', customer_email);
   console.log('estimated_amount:', estimated_amount);
+  console.log('profit_percentage:', profit_percentage);
+  console.log('quantity:', quantity);
   console.log('advance_amount:', advance_amount);
   console.log('estimated_completion_date:', estimated_completion_date);
   console.log('category_id:', category_id, 'type:', typeof category_id);
@@ -90,9 +106,28 @@ router.post("/create", (req, res) => {
   const order_reference = generateOrderReference('CUST');
   console.log('Generated order reference:', order_reference);
 
-  // Determine payment status
-  const payment_status = advance_amount > 0
-    ? (parseFloat(advance_amount) >= parseFloat(estimated_amount) ? 'Fully Paid' : 'Partially Paid')
+  // Calculate total amount with profit
+  const parsedEstimatedAmount = parseFloat(estimated_amount);
+  const parsedProfitPercentage = profit_percentage ? Math.min(parseFloat(profit_percentage), 15) : 0;
+  const parsedQuantity = quantity ? parseInt(quantity, 10) : 1;
+
+  console.log(`Calculating total amount: Estimated: ${parsedEstimatedAmount}, Profit: ${parsedProfitPercentage}%, Quantity: ${parsedQuantity}`);
+
+  // Calculate profit amount
+  const profitAmount = parsedEstimatedAmount * (parsedProfitPercentage / 100);
+
+  // Calculate price per unit (estimated amount + profit)
+  const pricePerUnit = parsedEstimatedAmount + profitAmount;
+
+  // Calculate total amount (price per unit * quantity)
+  const totalAmount = pricePerUnit * parsedQuantity;
+
+  console.log(`Calculated values: Profit Amount: ${profitAmount}, Price Per Unit: ${pricePerUnit}, Total Amount: ${totalAmount}`);
+
+  // Determine payment status based on total amount
+  const parsedAdvanceAmount = parseFloat(advance_amount) || 0;
+  const payment_status = parsedAdvanceAmount > 0
+    ? (parsedAdvanceAmount >= totalAmount ? 'Fully Paid' : 'Partially Paid')
     : 'Not Paid';
 
   console.log('Payment status:', payment_status);
@@ -184,6 +219,8 @@ router.post("/create", (req, res) => {
           customer_email,
           estimated_completion_date,
           estimated_amount,
+          profit_percentage,
+          quantity,
           advance_amount,
           order_status,
           payment_status,
@@ -193,11 +230,37 @@ router.post("/create", (req, res) => {
           special_requirements,
           created_by,
           branch_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
 
       // Log the SQL query for debugging
       console.log('SQL Query:', insertSql);
+
+      // Ensure profit percentage is within limits (max 15%)
+      let parsedProfitPercentage = null;
+      if (profit_percentage !== undefined && profit_percentage !== '') {
+        parsedProfitPercentage = Math.min(parseFloat(profit_percentage), 15);
+      }
+
+      console.log('Profit percentage:', profit_percentage, 'Parsed profit percentage:', parsedProfitPercentage);
+
+      // Parse quantity (default to 1 if not provided)
+      const parsedQuantity = quantity ? parseInt(quantity, 10) : 1;
+      console.log('Quantity:', quantity, 'Parsed quantity:', parsedQuantity);
+
+      // Store the estimated amount per unit (not multiplied by quantity)
+      const estimatedAmountPerUnit = parseFloat(estimated_amount);
+      console.log('Estimated amount per unit:', estimatedAmountPerUnit);
+
+      // Calculate the customer price ((estimated amount + profit) * quantity)
+      const profitAmount = estimatedAmountPerUnit * (parsedProfitPercentage / 100);
+      const pricePerUnit = estimatedAmountPerUnit + profitAmount;
+      const customerPrice = pricePerUnit * parsedQuantity;
+      console.log('Customer price:', customerPrice);
+
+      // Calculate the total supplier cost (for reference only)
+      const totalSupplierCost = estimatedAmountPerUnit * parsedQuantity;
+      console.log('Total supplier cost:', totalSupplierCost);
 
       const insertParams = [
         order_reference,
@@ -205,7 +268,9 @@ router.post("/create", (req, res) => {
         customer_phone || null,
         customer_email || null,
         estimated_completion_date || null,
-        parseFloat(estimated_amount),
+        estimatedAmountPerUnit, // Store the estimated amount per unit (not multiplied by quantity)
+        parsedProfitPercentage,
+        parsedQuantity,
         parseFloat(advance_amount) || 0,
         'Pending',
         payment_status,
@@ -227,15 +292,16 @@ router.post("/create", (req, res) => {
       console.log('4. customer_email:', insertParams[3]);
       console.log('5. estimated_completion_date:', insertParams[4]);
       console.log('6. estimated_amount:', insertParams[5]);
-      console.log('7. advance_amount:', insertParams[6]);
-      console.log('8. order_status:', insertParams[7]);
-      console.log('9. payment_status:', insertParams[8]);
-      console.log('10. category_id:', insertParams[9]);
-      console.log('11. supplier_id:', insertParams[10], 'type:', typeof insertParams[10]);
-      console.log('12. description:', insertParams[11]);
-      console.log('13. special_requirements:', insertParams[12]);
-      console.log('14. created_by:', insertParams[13]);
-      console.log('15. branch_id:', insertParams[14]);
+      console.log('7. profit_percentage:', insertParams[6]);
+      console.log('8. advance_amount:', insertParams[7]);
+      console.log('9. order_status:', insertParams[8]);
+      console.log('10. payment_status:', insertParams[9]);
+      console.log('11. category_id:', insertParams[10]);
+      console.log('12. supplier_id:', insertParams[11], 'type:', typeof insertParams[11]);
+      console.log('13. description:', insertParams[12]);
+      console.log('14. special_requirements:', insertParams[13]);
+      console.log('15. created_by:', insertParams[14]);
+      console.log('16. branch_id:', insertParams[15]);
 
       // Enhanced debugging for supplier_id
       console.log('SUPPLIER DEBUG - Final supplier_id being inserted:', parsedSupplierId, 'type:', typeof parsedSupplierId);
@@ -350,9 +416,31 @@ router.post("/create", (req, res) => {
 
               const payment_reference = `${referencePrefix}${nextSeq.toString().padStart(4, '0')}`;
 
-              // Calculate balance amount
-              const balance_amount = parseFloat(estimated_amount) - parseFloat(advance_amount);
+              // Calculate balance amount based on customer price (with profit)
+              // Calculate the customer price ((estimated amount + profit) * quantity)
+              const parsedEstimatedAmount = parseFloat(estimated_amount);
+              const parsedProfitPercentage = profit_percentage ? Math.min(parseFloat(profit_percentage), 15) : 0;
+              const parsedQuantity = quantity ? parseInt(quantity, 10) : 1;
+
+              console.log(`Advance payment calculation: Estimated: ${parsedEstimatedAmount}, Profit: ${parsedProfitPercentage}%, Quantity: ${parsedQuantity}`);
+
+              // Calculate profit amount
+              const profitAmount = parsedEstimatedAmount * (parsedProfitPercentage / 100);
+
+              // Calculate price per unit (estimated amount + profit)
+              const pricePerUnit = parsedEstimatedAmount + profitAmount;
+
+              // Calculate total amount (price per unit * quantity)
+              const customerPrice = pricePerUnit * parsedQuantity;
+
+              // Calculate balance amount (customer price - advance amount)
+              const balance_amount = customerPrice - parseFloat(advance_amount);
               const payment_status = balance_amount <= 0 ? 'Completed' : 'Partially Paid';
+
+              console.log('Price per unit:', pricePerUnit);
+              console.log('Customer price (with quantity):', customerPrice);
+              console.log('Advance amount:', parseFloat(advance_amount));
+              console.log('Balance amount:', balance_amount);
 
               // Insert into advance_payments table
               const advancePaymentSql = `
@@ -373,10 +461,22 @@ router.post("/create", (req, res) => {
                 ) VALUES (?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
               `;
 
+              // Log the values being inserted into advance_payments
+              console.log('Advance payment values:');
+              console.log('- payment_reference:', payment_reference);
+              console.log('- customer_name:', customer_name);
+              console.log('- total_amount:', customerPrice);
+              console.log('- advance_amount:', parseFloat(advance_amount));
+              console.log('- balance_amount:', balance_amount);
+              console.log('- payment_status:', payment_status);
+              console.log('- created_by:', parsedCreatedBy);
+              console.log('- branch_id:', parsedBranchId);
+              console.log('- order_id:', orderId);
+
               con.query(advancePaymentSql, [
                 payment_reference,
                 customer_name,
-                parseFloat(estimated_amount),
+                customerPrice, // Use customer price (with profit and quantity) as total amount
                 parseFloat(advance_amount),
                 balance_amount,
                 payment_status,
@@ -434,6 +534,61 @@ router.post("/create", (req, res) => {
   }
 });
 
+// Get completed custom orders for store manager dashboard
+router.get("/completed-orders", (req, res) => {
+  console.log('GET /custom-orders/completed-orders - Fetching completed custom orders');
+
+  // Get branch_id from query parameters
+  const branchId = req.query.branch_id;
+  const includePickedUp = req.query.include_picked_up === 'true';
+
+  if (!branchId) {
+    return res.status(400).json({ message: "Branch ID is required" });
+  }
+
+  // SQL query to get completed custom orders for the specified branch
+  // Include "Picked Up" status if requested
+  const statusCondition = includePickedUp
+    ? "co.order_status IN ('Completed', 'Picked Up')"
+    : "co.order_status = 'Completed'";
+
+  const sql = `
+    SELECT
+      co.*,
+      c.category_name,
+      b.branch_name
+    FROM
+      custom_orders co
+    LEFT JOIN
+      categories c ON co.category_id = c.category_id
+    LEFT JOIN
+      branches b ON co.branch_id = b.branch_id
+    WHERE
+      ${statusCondition}
+      AND co.branch_id = ?
+    ORDER BY
+      co.order_date DESC
+  `;
+
+  console.log('Executing SQL query for completed custom orders:', sql);
+  console.log('With parameters:', [branchId]);
+  console.log('Including picked up orders:', includePickedUp);
+
+  con.query(sql, [branchId], (err, results) => {
+    if (err) {
+      console.error("Error fetching completed custom orders:", err);
+      return res.status(500).json({ message: "Database error", error: err.message });
+    }
+
+    console.log(`Found ${results.length} completed custom orders`);
+    if (results.length > 0) {
+      console.log('Sample completed custom order:', results[0]);
+    }
+
+    res.json(results || []);
+  });
+});
+
 // Get all custom orders with payment information and branch-based filtering
 router.get("/", (req, res) => {
   console.log('GET /custom-orders - Fetching custom orders');
@@ -471,13 +626,19 @@ router.get("/", (req, res) => {
       (SELECT SUM(payment_amount) FROM custom_order_payments WHERE order_id = co.order_id) as total_custom_payments,
       CASE
         WHEN (SELECT MIN(balance_amount) FROM advance_payments WHERE order_id = co.order_id AND is_custom_order = 1) <= 0 THEN 'Fully Paid'
-        WHEN (SELECT SUM(advance_amount) FROM advance_payments WHERE order_id = co.order_id AND is_custom_order = 1) >= co.estimated_amount THEN 'Fully Paid'
-        WHEN (SELECT SUM(payment_amount) FROM custom_order_payments WHERE order_id = co.order_id) >= co.estimated_amount THEN 'Fully Paid'
+        WHEN (SELECT SUM(advance_amount) FROM advance_payments WHERE order_id = co.order_id AND is_custom_order = 1) >= co.estimated_amount * COALESCE(co.quantity, 1) THEN 'Fully Paid'
+        WHEN (SELECT SUM(payment_amount) FROM custom_order_payments WHERE order_id = co.order_id) >= co.estimated_amount * COALESCE(co.quantity, 1) THEN 'Fully Paid'
         WHEN (SELECT SUM(payment_amount) FROM custom_order_payments WHERE order_id = co.order_id) > 0 THEN 'Partially Paid'
         ELSE 'Not Paid'
       END as current_payment_status,
       (SELECT advance_amount FROM advance_payments WHERE order_id = co.order_id AND is_custom_order = 1 ORDER BY payment_id DESC LIMIT 1) as latest_advance_amount,
-      b.branch_name
+      b.branch_name,
+      CASE
+        WHEN co.profit_percentage IS NULL OR co.profit_percentage = 0 THEN
+          co.estimated_amount * COALESCE(co.quantity, 1)
+        ELSE
+          (co.estimated_amount + (co.estimated_amount * (co.profit_percentage / 100))) * COALESCE(co.quantity, 1)
+      END as total_amount_with_profit
     FROM custom_order_details co
     LEFT JOIN branches b ON co.branch_id = b.branch_id
   `;
@@ -562,6 +723,11 @@ router.get("/:id", (req, res) => {
   const orderId = req.params.id;
   const branchId = req.query.branch_id;
   let userRole = req.query.role;
+
+  // Skip processing for special endpoints
+  if (orderId === 'completed-orders') {
+    return res.status(404).json({ message: "Invalid endpoint" });
+  }
 
   // Normalize the role to lowercase for consistent comparison
   userRole = userRole ? userRole.toLowerCase() : '';
@@ -711,53 +877,79 @@ router.post("/:id/send-reminder", async (req, res) => {
 
   console.log(`POST /custom-orders/${orderId}/send-reminder - Sending payment reminder email`);
 
-  // Get the order details with customer email
-  console.log(`Fetching order details for order ID: ${orderId} for email reminder`);
-  const sql = `
-    SELECT co.*,
-           co.customer_email as customer_email,
-           co.order_id as order_id,
-           co.customer_name as customer_name,
-           co.estimated_amount as estimated_amount,
-           co.advance_amount as advance_amount,
-           co.order_date as order_date,
-           co.estimated_completion_date as estimated_completion_date
-    FROM custom_orders co
-    WHERE co.order_id = ?
+  // First, get the payment history to get the accurate total paid amount
+  console.log(`Fetching payment history for order ID: ${orderId} to get accurate payment information`);
+
+  // Get the payment history
+  const historySql = `
+    SELECT
+      COALESCE(SUM(ap.advance_amount), 0) as total_advance_payments
+    FROM
+      advance_payments ap
+    WHERE
+      ap.order_id = ? AND ap.is_custom_order = 1
   `;
 
-  con.query(sql, [orderId], async (err, results) => {
-    if (err) {
-      console.error("Error fetching custom order:", err);
-      return res.status(500).json({
-        success: false,
-        message: "Database error",
-        error: err.message
-      });
+  con.query(historySql, [orderId], async (historyErr, historyResults) => {
+    if (historyErr) {
+      console.error("Error fetching payment history:", historyErr);
+      return res.status(500).json({ message: "Database error", error: historyErr.message });
     }
 
-    if (results.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "Custom order not found"
-      });
-    }
+    const totalAdvancePayments = historyResults[0]?.total_advance_payments || 0;
+    console.log(`Total advance payments for order ${orderId}: ${totalAdvancePayments}`);
 
-    const order = results[0];
-    console.log("Found order:", order);
+    // Get the order details with customer email
+    console.log(`Fetching order details for order ID: ${orderId} for email reminder`);
+    const sql = `
+      SELECT co.*,
+             co.customer_email as customer_email,
+             co.order_id as order_id,
+             co.customer_name as customer_name,
+             co.estimated_amount as estimated_amount,
+             co.profit_percentage as profit_percentage,
+             co.quantity as quantity,
+             co.order_date as order_date,
+             co.estimated_completion_date as estimated_completion_date
+      FROM custom_orders co
+      WHERE co.order_id = ?
+    `;
 
-    // Check if customer email exists
-    if (!order.customer_email) {
-      console.log("No customer email found for order:", orderId);
-      return res.status(400).json({
-        success: false,
-        message: "Customer email not available for this order"
-      });
-    }
+    con.query(sql, [orderId], async (err, results) => {
+      if (err) {
+        console.error("Error fetching custom order:", err);
+        return res.status(500).json({
+          success: false,
+          message: "Database error",
+          error: err.message
+        });
+      }
 
-    console.log("Customer email found:", order.customer_email);
+      if (results.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Custom order not found"
+        });
+      }
 
-    try {
+      const order = results[0];
+      console.log("Found order:", order);
+
+      // Update the order with the accurate advance payment amount from history
+      order.advance_amount = totalAdvancePayments;
+
+      // Check if customer email exists
+      if (!order.customer_email) {
+        console.log("No customer email found for order:", orderId);
+        return res.status(400).json({
+          success: false,
+          message: "Customer email not available for this order"
+        });
+      }
+
+      console.log("Customer email found:", order.customer_email);
+
+      try {
       console.log(`Attempting to send email to ${order.customer_email}`);
 
       // Check if sendCustomOrderPaymentReminder is defined
@@ -771,7 +963,7 @@ router.post("/:id/send-reminder", async (req, res) => {
 
       // Send the reminder email
       console.log("Calling sendCustomOrderPaymentReminder with order:", order.order_id);
-      const emailResult = await sendCustomOrderPaymentReminder(order, order.customer_email);
+      const emailResult = sendCustomOrderPaymentReminder(order, order.customer_email);
       console.log("Email sending result:", emailResult);
 
       if (emailResult.success) {
@@ -853,7 +1045,7 @@ router.post("/:id/send-reminder", async (req, res) => {
 });
 
 // Test endpoint for email service
-router.post("/test-email", async (req, res) => {
+router.post("/test-email", async (_req, res) => {
   console.log("Testing email service...");
 
   try {
@@ -879,7 +1071,7 @@ router.post("/test-email", async (req, res) => {
 
     // Send test email
     console.log("Sending test email to:", testOrder.customer_email);
-    const emailResult = await sendCustomOrderPaymentReminder(testOrder, testOrder.customer_email);
+    const emailResult = sendCustomOrderPaymentReminder(testOrder, testOrder.customer_email);
     console.log("Test email result:", emailResult);
 
     return res.status(200).json({
@@ -897,4 +1089,319 @@ router.post("/test-email", async (req, res) => {
   }
 });
 
-export const customOrderRouter = router;
+
+
+// Update custom order status
+router.put("/:id/status", (req, res) => {
+  const orderId = req.params.id;
+  const { order_status, supplier_notes } = req.body;
+
+  console.log(`PUT /custom-orders/${orderId}/status - Updating custom order status`);
+  console.log('Request body:', req.body);
+
+  if (!order_status) {
+    console.log('Missing order_status in request body');
+    return res.status(400).json({ message: "Missing order status" });
+  }
+
+  // SQL query with optional supplier_notes
+  const sql = supplier_notes
+    ? `
+      UPDATE custom_orders
+      SET order_status = ?, supplier_notes = ?
+      WHERE order_id = ?
+    `
+    : `
+      UPDATE custom_orders
+      SET order_status = ?
+      WHERE order_id = ?
+    `;
+
+  // Parameters array based on whether supplier_notes is provided
+  const params = supplier_notes
+    ? [order_status, supplier_notes, orderId]
+    : [order_status, orderId];
+
+  console.log('Executing SQL query:', sql);
+  console.log('With parameters:', params);
+
+  con.query(sql, params, (err, result) => {
+    if (err) {
+      console.error("Error updating order status:", err);
+      return res.status(500).json({ message: "Database error", error: err.message });
+    }
+
+    console.log('Query result:', result);
+
+    if (result.affectedRows === 0) {
+      console.log(`No order found with ID ${orderId}`);
+      return res.status(404).json({ message: "Custom order not found" });
+    }
+
+    console.log(`Successfully updated order ${orderId} status to ${order_status}`);
+
+    res.json({
+      message: "Order status updated successfully",
+      order_id: orderId,
+      order_status,
+      supplier_notes: supplier_notes || null
+    });
+  });
+});
+
+// Send order completion notification to customer
+router.post("/:id/send-completion-notification", async (req, res) => {
+  const orderId = req.params.id;
+  const { pickup_location } = req.body;
+
+  console.log(`POST /custom-orders/${orderId}/send-completion-notification - Sending completion notification email`);
+
+  // First, get the payment history to get the accurate total paid amount
+  console.log(`Fetching payment history for order ID: ${orderId} to get accurate payment information`);
+
+  // Get the payment history
+  const historySql = `
+    SELECT
+      COALESCE(SUM(ap.advance_amount), 0) as total_advance_payments
+    FROM
+      advance_payments ap
+    WHERE
+      ap.order_id = ? AND ap.is_custom_order = 1
+  `;
+
+  con.query(historySql, [orderId], async (historyErr, historyResults) => {
+    if (historyErr) {
+      console.error("Error fetching payment history:", historyErr);
+      return res.status(500).json({ message: "Database error", error: historyErr.message });
+    }
+
+    const totalAdvancePayments = historyResults[0]?.total_advance_payments || 0;
+    console.log(`Total advance payments for order ${orderId}: ${totalAdvancePayments}`);
+
+    // Get the order details with customer email
+    const sql = `
+      SELECT co.*,
+             co.customer_email as customer_email,
+             co.order_id as order_id,
+             co.customer_name as customer_name,
+             co.estimated_amount as estimated_amount,
+             co.profit_percentage as profit_percentage,
+             co.quantity as quantity,
+             co.order_date as order_date,
+             co.estimated_completion_date as estimated_completion_date,
+             b.branch_name,
+             b.location as branch_address,
+             b.contact_number as branch_phone
+      FROM custom_orders co
+      LEFT JOIN branches b ON co.branch_id = b.branch_id
+      WHERE co.order_id = ?
+    `;
+
+    con.query(sql, [orderId], async (err, results) => {
+      if (err) {
+        console.error("Error fetching custom order:", err);
+        return res.status(500).json({
+          success: false,
+          message: "Database error",
+          error: err.message
+        });
+      }
+
+      if (results.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Custom order not found"
+        });
+      }
+
+      const order = results[0];
+      console.log("Found order:", order);
+
+      // Update the order with the accurate advance payment amount from history
+      order.advance_amount = totalAdvancePayments;
+
+      // Check if customer email exists
+      if (!order.customer_email) {
+        console.log("No customer email found for order:", orderId);
+        return res.status(400).json({
+          success: false,
+          message: "Customer email not available for this order"
+        });
+      }
+
+      console.log("Customer email found:", order.customer_email);
+
+      try {
+        console.log(`Attempting to send completion notification to ${order.customer_email}`);
+
+        // Check if sendOrderStatusUpdate is defined
+        if (typeof sendOrderStatusUpdate !== 'function') {
+          console.error("sendOrderStatusUpdate is not a function:", sendOrderStatusUpdate);
+          return res.status(500).json({
+            success: false,
+            message: "Email service not properly initialized"
+          });
+        }
+
+        // Add pickup location to order object
+        order.pickup_location = pickup_location || order.branch_name || 'our store';
+
+        // Calculate remaining balance
+        // Calculate total amount with profit and quantity
+        const baseAmount = Number(order.estimated_amount) || 0;
+        const profitPercentage = Number(order.profit_percentage) || 0;
+        const quantity = Number(order.quantity) || 1;
+
+        // Calculate total amount with profit and quantity
+        const totalAmount = profitPercentage > 0
+          ? (baseAmount * (1 + profitPercentage/100) * quantity)
+          : (baseAmount * quantity);
+
+        const paidAmount = Number(order.advance_amount) || 0;
+        const remainingBalance = totalAmount - paidAmount;
+        order.remaining_balance = remainingBalance;
+
+        // Send the completion notification email
+        console.log("Calling sendOrderStatusUpdate with order:", order.order_id);
+        const emailResult = sendOrderStatusUpdate(order, order.customer_email, 'Completed');
+        console.log("Email sending result:", emailResult);
+
+        if (emailResult.success) {
+          // Log the email sent in the database if email_logs table exists
+          try {
+            const logSql = `
+              INSERT INTO email_logs (
+                order_id,
+                email_type,
+                recipient_email,
+                sent_at,
+                status,
+                message_id,
+                error_message
+              ) VALUES (?, ?, ?, NOW(), ?, ?, ?)
+            `;
+
+            // Check if this is a mock email
+            const isMockEmail = emailResult.mockEmail === true;
+            const status = isMockEmail ? 'mock_sent' : 'sent';
+            const notes = isMockEmail ? 'Mock email (nodemailer not installed)' : null;
+
+            con.query(logSql, [
+              orderId,
+              'completion_notification',
+              order.customer_email,
+              status,
+              emailResult.messageId || null,
+              notes
+            ], (logErr) => {
+              if (logErr) {
+                console.error("Error logging email:", logErr);
+                // Continue anyway since the email was sent
+              } else {
+                console.log(`Email log saved to database (${isMockEmail ? 'mock' : 'real'} email)`);
+              }
+            });
+          } catch (logError) {
+            console.error("Error with email logging:", logError);
+            // Continue anyway since the email was sent
+          }
+
+          // Check if this is a mock email
+          const isMockEmail = emailResult.mockEmail === true;
+          const message = isMockEmail
+            ? "Mock completion notification email generated successfully (nodemailer not installed)"
+            : "Real completion notification email sent successfully to " + order.customer_email;
+
+          console.log("Email sending result:", {
+            success: true,
+            isMock: isMockEmail,
+            message: message,
+            messageId: emailResult.messageId
+          });
+
+          return res.status(200).json({
+            success: true,
+            message: message,
+            messageId: emailResult.messageId,
+            isMockEmail: isMockEmail
+          });
+        } else {
+          console.error("Email sending failed:", emailResult.error);
+          return res.status(500).json({
+            success: false,
+            message: "Failed to send completion notification email",
+            error: emailResult.error
+          });
+        }
+      } catch (error) {
+        console.error("Error in send-completion-notification endpoint:", error);
+        return res.status(500).json({
+          success: false,
+          message: "Server error while sending notification",
+          error: error.message
+        });
+      }
+    });
+  });
+});
+
+// Mark a custom order as picked up
+router.put("/:id/mark-as-picked-up", (req, res) => {
+  const orderId = req.params.id;
+  const { pickup_notes } = req.body;
+
+  console.log(`PUT /custom-orders/${orderId}/mark-as-picked-up - Marking custom order as picked up`);
+  console.log('Request body:', req.body);
+
+  // Begin transaction
+  con.beginTransaction(err => {
+    if (err) {
+      console.error("Error starting transaction:", err);
+      return res.status(500).json({ message: "Database error", error: err.message });
+    }
+
+    // Update order status to "Picked Up"
+    const updateOrderSql = `
+      UPDATE custom_orders
+      SET order_status = 'Picked Up',
+          pickup_date = NOW(),
+          pickup_notes = ?
+      WHERE order_id = ?
+    `;
+
+    con.query(updateOrderSql, [pickup_notes || null, orderId], (updateErr, updateResult) => {
+      if (updateErr) {
+        return con.rollback(() => {
+          console.error("Error updating order status:", updateErr);
+          res.status(500).json({ message: "Database error", error: updateErr.message });
+        });
+      }
+
+      if (updateResult.affectedRows === 0) {
+        return con.rollback(() => {
+          console.log(`No order found with ID ${orderId}`);
+          res.status(404).json({ message: "Custom order not found" });
+        });
+      }
+
+      // Commit the transaction
+      con.commit(commitErr => {
+        if (commitErr) {
+          return con.rollback(() => {
+            console.error("Error committing transaction:", commitErr);
+            res.status(500).json({ message: "Database error", error: commitErr.message });
+          });
+        }
+
+        console.log(`Successfully marked order ${orderId} as picked up`);
+        res.json({
+          success: true,
+          message: "Order marked as picked up successfully",
+          order_id: orderId
+        });
+      });
+    });
+  });
+});
+
+module.exports = router;

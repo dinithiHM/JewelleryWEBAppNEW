@@ -15,6 +15,31 @@ interface PaymentRecord {
   created_by?: number;
 }
 
+interface OrderItem {
+  order_item_id: number;
+  order_id: number;
+  category: string;
+  quantity: number;
+  offer_gold: number;
+  selected_karats: string;
+  karat_values: string;
+  design_image?: string;
+  design_image_url?: string;
+  status: string;
+  gold_price_per_gram?: number;
+  weight_in_grams?: number;
+  making_charges?: number;
+  additional_materials_charges?: number;
+  base_estimated_price?: number;
+  estimated_price?: number;
+  total_amount?: number;
+  selectedKarat?: string;
+  goldPurity?: number;
+  offered_gold_value?: number;
+  created_at: string;
+  updated_at?: string;
+}
+
 interface Order {
   order_id: number;
   category: string;
@@ -27,6 +52,7 @@ interface Order {
   design_image_url?: string;
   status: string;
   created_at: string;
+  updated_at?: string;
   branch_id?: number;
   branch_name?: string;
   created_by?: number;
@@ -43,6 +69,7 @@ interface Order {
   estimated_price?: number;
   total_amount?: number;
   useCustomPrice?: boolean;
+  use_custom_estimate?: boolean;
 
   // Payment details
   advance_payment_amount?: number;
@@ -53,6 +80,10 @@ interface Order {
 
   // Payment history
   payment_history?: PaymentRecord[];
+
+  // Order items
+  items?: OrderItem[];
+  itemsCount?: number;
 }
 
 const ViewOrdersPage = () => {
@@ -242,7 +273,7 @@ const ViewOrdersPage = () => {
             goldPurity: 0.999,
             weight_in_grams: 15.5,
             making_charges: 25000,
-            additional_materials_charges: 8500,
+            additional_materials_charges: 1200,
             base_estimated_price: 492453.14, // gold_price_per_gram * weight_in_grams
             estimated_price: 525953.14, // base_estimated_price + making_charges + additional_materials_charges
             total_amount: 5259531.40, // estimated_price * quantity
@@ -271,7 +302,7 @@ const ViewOrdersPage = () => {
             goldPurity: 0.916,
             weight_in_grams: 8.2,
             making_charges: 12000,
-            additional_materials_charges: 3500,
+            additional_materials_charges: 1200,
             base_estimated_price: 238826.97, // gold_price_per_gram * weight_in_grams
             estimated_price: 254326.97, // base_estimated_price + making_charges + additional_materials_charges
             total_amount: 5086539.40, // estimated_price * quantity
@@ -299,7 +330,7 @@ const ViewOrdersPage = () => {
             goldPurity: 0.875,
             weight_in_grams: 25.8,
             making_charges: 35000,
-            additional_materials_charges: 12500,
+            additional_materials_charges: 1200,
             base_estimated_price: 777237.90, // gold_price_per_gram * weight_in_grams
             estimated_price: 824737.90, // base_estimated_price + making_charges + additional_materials_charges
             total_amount: 4123689.50, // estimated_price * quantity
@@ -539,9 +570,42 @@ const ViewOrdersPage = () => {
   });
 
   // Handle view order details
-  const handleViewOrderDetails = (order: Order) => {
-    setSelectedOrder(order);
-    setShowOrderDetails(true);
+  const handleViewOrderDetails = async (order: Order) => {
+    try {
+      // Fetch the complete order details including all items
+      const response = await fetch(`http://localhost:3002/orders/${order.order_id}?role=${userRole}&branch_id=${userBranchId || ''}`);
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch order details: ${response.status}`);
+      }
+
+      const orderDetails = await response.json();
+      console.log('Fetched order details:', orderDetails);
+
+      // Check if we have items in the response
+      if (orderDetails.items && Array.isArray(orderDetails.items)) {
+        console.log(`Found ${orderDetails.items.length} items for order #${order.order_id}`);
+      } else {
+        console.log(`No items found for order #${order.order_id}`);
+        // Initialize empty items array if none exists
+        orderDetails.items = [];
+      }
+
+      // Set the selected order with the complete details
+      setSelectedOrder({
+        ...order,
+        ...orderDetails
+      });
+      setShowOrderDetails(true);
+    } catch (err) {
+      console.error('Error fetching order details:', err);
+      // Fall back to using the existing order data but ensure it has an items array
+      setSelectedOrder({
+        ...order,
+        items: order.items || []
+      });
+      setShowOrderDetails(true);
+    }
   };
 
   // Close order details modal

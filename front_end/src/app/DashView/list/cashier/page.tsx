@@ -15,6 +15,7 @@ interface Cashier {
   email: string;
   username: string;
   branch_id: number;
+  branch_name?: string; // Add branch name
   nic: string;
   phone: string;
   address: string;
@@ -44,6 +45,31 @@ const CashierListPage = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<string>("");
+  const [selectedBranch, setSelectedBranch] = useState<number | null>(null);
+
+  // Function to filter cashiers by branch
+  const filterByBranch = (cashierList: Cashier[], branchId: number | null) => {
+    if (!branchId) return cashierList;
+    return cashierList.filter(cashier => cashier.branch_id === branchId);
+  };
+
+  // Function to get branch name from branch ID
+  const getBranchName = (branchId: number): string => {
+    switch (branchId) {
+      case 1:
+        return "Mahiyangana Branch";
+      case 2:
+        return "Mahaoya Branch";
+      default:
+        return `Branch ${branchId}`;
+    }
+  };
+
+  // Handle branch filter change
+  const handleBranchFilterChange = (branchId: number | null) => {
+    setSelectedBranch(branchId);
+    setFilteredCashiers(filterByBranch(cashiers, branchId));
+  };
 
   // Add delete handler
   const handleDelete = async (id: number) => {
@@ -114,26 +140,22 @@ const CashierListPage = () => {
   };
 
   useEffect(() => {
-    // Get role from localStorage
+    // Get role and branch from localStorage
     const storedRole = localStorage.getItem("role");
+    const storedBranchId = localStorage.getItem("branchId");
+
     if (storedRole) {
       setUserRole(storedRole);
     }
 
-    // Check database structure to debug
-    const checkDatabaseStructure = async () => {
-      try {
-        const response = await fetch("http://localhost:3002/cashiers/check-table-structure");
-        if (response.ok) {
-          const data = await response.json();
-          console.log("Database structure for users table:", data);
-        }
-      } catch (error) {
-        console.error("Error checking database structure:", error);
-      }
-    };
+    if (storedBranchId) {
+      const branchId = parseInt(storedBranchId);
 
-    checkDatabaseStructure();
+      // If user is not admin, automatically filter by their branch
+      if (storedRole !== "Admin") {
+        setSelectedBranch(branchId);
+      }
+    }
 
     const fetchCashiers = async () => {
       try {
@@ -158,13 +180,20 @@ const CashierListPage = () => {
             email: item.email,
             username: item.username,
             branch_id: item.branch_id,
+            branch_name: item.branch_name, // Include branch name if available
             nic: item.nic,
             phone: item.phone,
             address: item.address
           }));
 
           setCashiers(mappedData);
-          setFilteredCashiers(mappedData);
+
+          // Apply branch filter if selected
+          if (selectedBranch) {
+            setFilteredCashiers(filterByBranch(mappedData, selectedBranch));
+          } else {
+            setFilteredCashiers(mappedData);
+          }
         } else {
           throw new Error('Invalid data format received');
         }
@@ -188,7 +217,7 @@ const CashierListPage = () => {
         </div>
       </td>
       <td className="hidden md:table-cell">{item.username}</td>
-      <td className="hidden md:table-cell">{item.branch_id}</td>
+      <td className="hidden md:table-cell">{item.branch_name || getBranchName(item.branch_id)}</td>
       <td className="hidden lg:table-cell">{item.nic}</td>
       <td className="hidden lg:table-cell">{item.phone}</td>
       <td className="hidden lg:table-cell">{item.address}</td>
@@ -251,10 +280,28 @@ const CashierListPage = () => {
         <h1 className="hidden md:block text-lg font-semibold">Cashiers</h1>
         <div className="flex flex-col md:flex-row items-center gap-4 w-full md:w-auto">
           <TableSearch onSearch={handleSearch} placeholder="Search cashiers..." />
+
+          {/* Branch Filter Dropdown */}
+          <div className="relative">
+            <select
+              className="appearance-none bg-white border border-gray-300 rounded-md py-2 px-3 pr-8 text-sm leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500"
+              value={selectedBranch || ""}
+              onChange={(e) => {
+                const value = e.target.value;
+                const branchId = value ? parseInt(value) : null;
+                handleBranchFilterChange(branchId);
+              }}
+            >
+              <option value="">All Branches</option>
+              <option value="1">Mahiyangana Branch</option>
+              <option value="2">Mahaoya Branch</option>
+            </select>
+            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-700">
+              <Filter size={14} />
+            </div>
+          </div>
+
           <div className="flex items-center gap-4 self-end">
-            <button className="w-8 h-8 flex items-center justify-center rounded-full bg-[#FFF6BD]">
-              <Filter size={14} className="text-gray-700" />
-            </button>
             <button className="w-8 h-8 flex items-center justify-center rounded-full bg-[#FFF6BD]">
               <SortDesc size={14} className="text-gray-700" />
             </button>

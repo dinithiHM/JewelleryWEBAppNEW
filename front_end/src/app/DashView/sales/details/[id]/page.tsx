@@ -153,9 +153,10 @@ const SaleDetailsPage = ({ params }: { params: { id: string } }) => {
           URL.revokeObjectURL(url);
           console.log('Cleanup completed');
         }, 100);
-      } catch (pdfError) {
+      } catch (error) {
+        const pdfError = error as Error;
         console.error('Error in PDF generation:', pdfError);
-        alert('Error generating PDF: ' + pdfError.message);
+        alert('Error generating PDF: ' + (pdfError.message || 'Unknown error'));
       }
 
       // If the invoice was just created, refresh the sale data
@@ -316,6 +317,7 @@ const SaleDetailsPage = ({ params }: { params: { id: string } }) => {
                       {item.quantity}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
+                      {/* Display the original price (selected unit price when sale was made) */}
                       {item.original_price ? formatCurrency(item.original_price) : formatCurrency(item.unit_price)}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -329,7 +331,7 @@ const SaleDetailsPage = ({ params }: { params: { id: string } }) => {
                       {formatCurrency(item.unit_price)}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap font-medium">
-                      {formatCurrency(item.subtotal)}
+                      {formatCurrency(item.unit_price * item.quantity)}
                     </td>
                   </tr>
                 ))}

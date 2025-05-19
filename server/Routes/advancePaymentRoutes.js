@@ -54,7 +54,18 @@ router.get("/", (req, res) => {
 
   // Start building the SQL query - use a subquery to get only the latest payment for each customer-order combination
   let sql = `
-    SELECT ap.*
+    SELECT
+      ap.*,
+      CASE
+        WHEN ap.is_custom_order = 0 AND ap.item_id IS NOT NULL THEN
+          (SELECT ji.product_title FROM jewellery_items ji WHERE ji.item_id = ap.item_id)
+        ELSE NULL
+      END as item_name,
+      CASE
+        WHEN ap.is_custom_order = 0 AND ap.item_id IS NOT NULL THEN
+          (SELECT ji.category FROM jewellery_items ji WHERE ji.item_id = ap.item_id)
+        ELSE NULL
+      END as item_category
     FROM advance_payments ap
     INNER JOIN (
       SELECT
@@ -71,9 +82,14 @@ router.get("/", (req, res) => {
   const params = [];
 
   // Add branch filter if applicable
-  if (branch_id && role !== 'admin') {
+  const filter_branch = req.query.filter_branch === 'true';
+
+  // Apply branch filter if branch_id is provided and filter_branch is true
+  // This allows admin users to filter by branch when they choose to
+  if (branch_id && filter_branch) {
     whereConditions.push('ap.branch_id = ?');
     params.push(branch_id);
+    console.log(`Filtering by branch_id: ${branch_id}`);
   }
 
   // Add status filter if applicable
@@ -122,12 +138,23 @@ router.get("/", (req, res) => {
 router.get("/history/order/:orderId", (req, res) => {
   const orderId = req.params.orderId;
 
-  // First, get the order details to get the total amount
+  // First, get the order details to get the total amount with profit and quantity
   const orderSql = `
-    SELECT order_id, order_reference, customer_name, estimated_amount
-    FROM custom_orders
-    WHERE order_id = ?
+    SELECT co.order_id, co.order_reference, co.customer_name, co.estimated_amount,
+           co.profit_percentage, co.quantity,
+           CASE
+             WHEN co.profit_percentage IS NULL OR co.profit_percentage = 0 THEN
+               CASE
+                 WHEN co.quantity IS NULL OR co.quantity = 0 THEN co.estimated_amount
+                 ELSE co.estimated_amount * co.quantity
+               END
+             ELSE (co.estimated_amount + (co.estimated_amount * (co.profit_percentage / 100))) * COALESCE(co.quantity, 1)
+           END AS total_amount_with_profit
+    FROM custom_orders co
+    WHERE co.order_id = ?
   `;
+
+  console.log(`Fetching order details for order ID: ${orderId} to calculate correct total amount with profit and quantity`);
 
   con.query(orderSql, [orderId], (orderErr, orderResults) => {
     if (orderErr) {
@@ -140,6 +167,39 @@ router.get("/history/order/:orderId", (req, res) => {
     }
 
     const order = orderResults[0];
+
+    // Calculate the total amount with profit and quantity
+    const estimatedAmount = parseFloat(order.estimated_amount);
+    const profitPercentage = order.profit_percentage ? parseFloat(order.profit_percentage) : 0;
+    const quantity = order.quantity ? parseInt(order.quantity) : 1;
+
+    // Calculate profit amount
+    const profitAmount = estimatedAmount * (profitPercentage / 100);
+
+    // Calculate price per unit (estimated amount + profit)
+    const pricePerUnit = estimatedAmount + profitAmount;
+
+    // Calculate total amount (price per unit * quantity)
+    const totalAmountWithProfit = pricePerUnit * quantity;
+
+    console.log(`Order ${orderId} calculation breakdown:`);
+    console.log(`- Estimated amount: ${estimatedAmount}`);
+    console.log(`- Profit percentage: ${profitPercentage}%`);
+    console.log(`- Profit amount: ${profitAmount}`);
+    console.log(`- Price per unit: ${pricePerUnit}`);
+    console.log(`- Quantity: ${quantity}`);
+    console.log(`- Total amount with profit: ${totalAmountWithProfit}`);
+
+    console.log(`Payment history for order ${orderId}: Estimated: ${estimatedAmount}, Profit: ${profitPercentage}%, Quantity: ${quantity}`);
+    console.log(`Price per unit: ${pricePerUnit}, Total with profit: ${totalAmountWithProfit}`);
+
+    console.log(`Order ${orderId} details: Estimated: ${estimatedAmount}, Profit: ${profitPercentage}%, Quantity: ${quantity}`);
+    console.log(`Calculated total with profit: ${totalAmountWithProfit}, SQL calculated: ${order.total_amount_with_profit}`);
+
+    // Make sure we're using the correct total amount with profit
+    if (Math.abs(totalAmountWithProfit - order.total_amount_with_profit) > 0.01) {
+      console.log(`Warning: Calculated total (${totalAmountWithProfit}) differs from SQL calculated total (${order.total_amount_with_profit}). Using calculated value.`);
+    }
 
     // Now get all payments for this order
     const paymentsSql = `
@@ -158,12 +218,12 @@ router.get("/history/order/:orderId", (req, res) => {
       // Calculate total paid amount
       const totalPaid = paymentsResults.reduce((sum, payment) => sum + parseFloat(payment.advance_amount), 0);
 
-      // Calculate remaining balance
-      const remainingBalance = parseFloat(order.estimated_amount) - totalPaid;
+      // Calculate remaining balance based on total amount with profit
+      const remainingBalance = totalAmountWithProfit - totalPaid;
 
       // Determine payment status
       let paymentStatus = "Pending";
-      if (totalPaid >= parseFloat(order.estimated_amount)) {
+      if (totalPaid >= totalAmountWithProfit) {
         paymentStatus = "Completed";
       } else if (totalPaid > 0) {
         paymentStatus = "Partially Paid";
@@ -176,7 +236,7 @@ router.get("/history/order/:orderId", (req, res) => {
         return {
           ...payment,
           running_total_paid: runningTotal,
-          balance_after: parseFloat(order.estimated_amount) - runningTotal
+          balance_after: totalAmountWithProfit - runningTotal
         };
       });
 
@@ -184,7 +244,10 @@ router.get("/history/order/:orderId", (req, res) => {
         order_id: order.order_id,
         order_reference: order.order_reference,
         customer_name: order.customer_name,
-        total_amount: parseFloat(order.estimated_amount),
+        estimated_amount: estimatedAmount,
+        profit_percentage: profitPercentage,
+        quantity: quantity,
+        total_amount: totalAmountWithProfit,
         payments: paymentsWithRunningTotals,
         total_payments: paymentsResults.length,
         total_paid: totalPaid,
@@ -288,11 +351,21 @@ router.post("/:id/send-reminder", async (req, res) => {
 
   console.log(`POST /advance-payments/${paymentId}/send-reminder - Sending payment reminder email`);
 
-  // Get the payment details with customer email
+  // Get the payment details with item details
   const sql = `
-    SELECT ap.*, c.email as customer_email
+    SELECT
+      ap.*,
+      CASE
+        WHEN ap.is_custom_order = 0 AND ap.item_id IS NOT NULL THEN
+          (SELECT ji.product_title FROM jewellery_items ji WHERE ji.item_id = ap.item_id)
+        ELSE NULL
+      END as item_name,
+      CASE
+        WHEN ap.is_custom_order = 0 AND ap.item_id IS NOT NULL THEN
+          (SELECT ji.category FROM jewellery_items ji WHERE ji.item_id = ap.item_id)
+        ELSE NULL
+      END as item_category
     FROM advance_payments ap
-    LEFT JOIN customers c ON ap.customer_name = c.name
     WHERE ap.payment_id = ?
   `;
 
@@ -312,7 +385,7 @@ router.post("/:id/send-reminder", async (req, res) => {
     if (!payment.customer_email) {
       return res.status(400).json({
         success: false,
-        message: "Cannot send reminder: Customer email is not available"
+        message: "Cannot send reminder: Customer email is not available. Please add a customer email in the advance payment details."
       });
     }
 
@@ -324,44 +397,8 @@ router.post("/:id/send-reminder", async (req, res) => {
       console.log("Email sending result:", emailResult);
 
       if (emailResult.success) {
-        // Log the email sent in the database
-        try {
-          const logSql = `
-            INSERT INTO email_logs (
-              payment_id,
-              email_type,
-              recipient_email,
-              sent_at,
-              status,
-              message_id,
-              error_message
-            ) VALUES (?, ?, ?, NOW(), ?, ?, ?)
-          `;
-
-          // Check if this is a mock email
-          const isMockEmail = emailResult.mockEmail === true;
-          const status = isMockEmail ? 'mock_sent' : 'sent';
-          const notes = isMockEmail ? 'Mock email (nodemailer not installed)' : null;
-
-          con.query(logSql, [
-            paymentId,
-            'payment_reminder',
-            payment.customer_email,
-            status,
-            emailResult.messageId || null,
-            notes
-          ], (logErr) => {
-            if (logErr) {
-              console.error("Error logging email:", logErr);
-              // Continue anyway since the email was sent
-            } else {
-              console.log(`Email log saved to database (${isMockEmail ? 'mock' : 'real'} email)`);
-            }
-          });
-        } catch (logError) {
-          console.error("Error with email logging:", logError);
-          // Continue anyway since the email was sent
-        }
+        // Skip email logging for now - we'll implement it properly later
+        console.log("Email sent successfully, skipping database logging for now");
 
         // Check if this is a mock email
         const isMockEmail = emailResult.mockEmail === true;
@@ -407,6 +444,7 @@ router.post("/create", (req, res) => {
 
   const {
     customer_name,
+    customer_email,
     total_amount,
     advance_amount,
     payment_method,
@@ -446,12 +484,20 @@ router.post("/create", (req, res) => {
     balance_amount = parseFloat(total_amount) - (parseFloat(advance_amount) + existingAmount);
   }
 
-  // Determine payment status
+  // Determine payment status for advance_payments table
   let payment_status = "Pending";
   if (balance_amount <= 0) {
     payment_status = "Completed";
   } else if (parseFloat(advance_amount) > 0) {
     payment_status = "Partially Paid";
+  }
+
+  // Determine payment status for custom_orders table (different enum values)
+  let custom_order_payment_status = "Not Paid";
+  if (balance_amount <= 0) {
+    custom_order_payment_status = "Fully Paid";
+  } else if (parseFloat(advance_amount) > 0) {
+    custom_order_payment_status = "Partially Paid";
   }
 
   // Generate a payment reference
@@ -462,6 +508,7 @@ router.post("/create", (req, res) => {
     INSERT INTO advance_payments (
       payment_reference,
       customer_name,
+      customer_email,
       payment_date,
       total_amount,
       advance_amount,
@@ -475,7 +522,7 @@ router.post("/create", (req, res) => {
       order_id,
       item_id,
       item_quantity
-    ) VALUES (?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `;
 
   con.beginTransaction((err) => {
@@ -499,6 +546,7 @@ router.post("/create", (req, res) => {
     const insertParams = [
       payment_reference,
       customer_name,
+      customer_email || null,
       total_amount,
       advance_amount,
       balance_amount,
@@ -531,7 +579,7 @@ router.post("/create", (req, res) => {
           WHERE order_id = ?
         `;
 
-        con.query(updateOrderSql, [payment_status, order_id], (updateErr) => {
+        con.query(updateOrderSql, [custom_order_payment_status, order_id], (updateErr) => {
           if (updateErr) {
             return con.rollback(() => {
               console.error("Error updating custom order:", updateErr);
@@ -684,10 +732,16 @@ router.put("/:id", (req, res) => {
     const newAdvanceAmount = parseFloat(payment.advance_amount) + parseFloat(additional_payment);
     const newBalanceAmount = parseFloat(payment.total_amount) - newAdvanceAmount;
 
-    // Determine new payment status
+    // Determine new payment status for advance_payments table
     let newPaymentStatus = "Partially Paid";
     if (newBalanceAmount <= 0) {
       newPaymentStatus = "Completed";
+    }
+
+    // Determine new payment status for custom_orders table (different enum values)
+    let newCustomOrderPaymentStatus = "Partially Paid";
+    if (newBalanceAmount <= 0) {
+      newCustomOrderPaymentStatus = "Fully Paid";
     }
 
     // For inventory items, we need to check if stock has already been deducted
@@ -752,8 +806,44 @@ router.put("/:id", (req, res) => {
             });
           }
 
+          // If this is a custom order, update the order's payment status
+          if (payment.is_custom_order && payment.order_id) {
+            const updateOrderSql = `
+              UPDATE custom_orders
+              SET payment_status = ?
+              WHERE order_id = ?
+            `;
+
+            con.query(updateOrderSql, [newCustomOrderPaymentStatus, payment.order_id], (updateOrderErr) => {
+              if (updateOrderErr) {
+                return con.rollback(() => {
+                  console.error("Error updating custom order payment status:", updateOrderErr);
+                  res.status(500).json({ message: "Database error", error: updateOrderErr.message });
+                });
+              }
+
+              // Continue with the rest of the transaction
+              con.commit((commitErr) => {
+                if (commitErr) {
+                  return con.rollback(() => {
+                    console.error("Error committing transaction:", commitErr);
+                    res.status(500).json({ message: "Database error", error: commitErr.message });
+                  });
+                }
+
+                res.json({
+                  message: "Advance payment updated successfully and custom order status updated",
+                  payment_id: paymentId,
+                  new_advance_amount: newAdvanceAmount,
+                  new_balance_amount: newBalanceAmount,
+                  payment_status: newPaymentStatus,
+                  custom_order_status: newCustomOrderPaymentStatus
+                });
+              });
+            });
+          }
           // If this is an inventory item, check if we need to deduct from stock
-          if (isInventoryItem) {
+          else if (isInventoryItem) {
             // Check if we've already deducted for this payment
             con.query(checkDeductionSql, [paymentId], (checkErr, checkResults) => {
               if (checkErr) {
@@ -863,6 +953,53 @@ router.put("/:id", (req, res) => {
   });
 });
 
+// Update customer email for an advance payment
+router.put("/:id/update-email", (req, res) => {
+  const paymentId = req.params.id;
+  const { customer_email } = req.body;
+
+  console.log(`PUT /advance-payments/${paymentId}/update-email - Updating customer email`);
+
+  // Validate email
+  if (!customer_email || !customer_email.includes('@')) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid email address"
+    });
+  }
+
+  const sql = `
+    UPDATE advance_payments
+    SET customer_email = ?
+    WHERE payment_id = ?
+  `;
+
+  con.query(sql, [customer_email, paymentId], (err, result) => {
+    if (err) {
+      console.error("Error updating customer email:", err);
+      return res.status(500).json({
+        success: false,
+        message: "Database error",
+        error: err.message
+      });
+    }
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Payment not found"
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "Customer email updated successfully",
+      payment_id: paymentId,
+      customer_email
+    });
+  });
+});
+
 // Get available jewellery items for advance payment
 router.get("/items/available", (_req, res) => {
   const sql = `
@@ -904,7 +1041,8 @@ router.get("/orders/custom", (_req, res) => {
       debugResults.forEach(order => {
         console.log(`Order ID: ${order.order_id}, Reference: ${order.order_reference}, ` +
                    `Customer: ${order.customer_name}, Estimated: ${order.estimated_amount}, ` +
-                   `Advance: ${order.advance_amount}, Status: ${order.payment_status}`);
+                   `Advance: ${order.advance_amount}, Status: ${order.payment_status}, ` +
+                   `Quantity: ${order.quantity || 1}, Profit: ${order.profit_percentage || 0}%`);
       });
     }
   });
@@ -923,27 +1061,52 @@ router.get("/orders/custom", (_req, res) => {
     }
   });
 
-  // Get custom orders that are not fully paid
+  // Get custom orders that are not fully paid (regardless of completion status)
   const sql = `
     SELECT
       co.order_id,
       co.order_reference,
       co.customer_name,
       co.estimated_amount,
+      co.profit_percentage,
+      co.quantity,
       co.advance_amount,
-      co.estimated_amount - co.advance_amount AS balance_amount,
+      -- Calculate total amount with profit and quantity
+      CASE
+        WHEN co.profit_percentage IS NULL OR co.profit_percentage = 0 THEN
+          CASE
+            WHEN co.quantity IS NULL OR co.quantity = 0 THEN co.estimated_amount
+            ELSE co.estimated_amount * co.quantity
+          END
+        ELSE (co.estimated_amount + (co.estimated_amount * (co.profit_percentage / 100))) * COALESCE(co.quantity, 1)
+      END AS total_amount_with_profit,
+      -- Calculate balance with profit and quantity
+      CASE
+        WHEN co.profit_percentage IS NULL OR co.profit_percentage = 0 THEN
+          CASE
+            WHEN co.quantity IS NULL OR co.quantity = 0 THEN co.estimated_amount - co.advance_amount
+            ELSE (co.estimated_amount * co.quantity) - co.advance_amount
+          END
+        ELSE (co.estimated_amount + (co.estimated_amount * (co.profit_percentage / 100))) * COALESCE(co.quantity, 1) - co.advance_amount
+      END AS balance_amount,
       co.payment_status,
+      co.order_status,
       co.order_date,
       co.estimated_completion_date
     FROM
       custom_orders co
     WHERE
       co.payment_status != 'Fully Paid'
+      -- Removed the condition that filtered out completed orders
+      -- We want to allow payments for completed orders as long as they're not fully paid
     ORDER BY
       co.order_date DESC
   `;
 
-  console.log('Fetching custom orders that are not fully paid');
+  console.log('SQL query for custom orders with correct profit and quantity calculation:');
+  console.log(sql);
+
+  console.log('Fetching custom orders that are not fully paid (including completed orders)');
 
   con.query(sql, (err, results) => {
     if (err) {
@@ -953,14 +1116,54 @@ router.get("/orders/custom", (_req, res) => {
 
     console.log(`Found ${results.length} custom orders that need payment`);
 
+    // Process each order to ensure correct calculations
+    const processedResults = results.map(order => {
+      // Calculate the total amount with profit and quantity
+      const estimatedAmount = parseFloat(order.estimated_amount);
+      const profitPercentage = order.profit_percentage ? parseFloat(order.profit_percentage) : 0;
+      const quantity = order.quantity ? parseInt(order.quantity) : 1;
+      const advanceAmount = parseFloat(order.advance_amount) || 0;
+
+      // Calculate profit amount
+      const profitAmount = estimatedAmount * (profitPercentage / 100);
+
+      // Calculate price per unit (estimated amount + profit)
+      const pricePerUnit = estimatedAmount + profitAmount;
+
+      // Calculate total amount (price per unit * quantity)
+      const totalAmountWithProfit = pricePerUnit * quantity;
+
+      // Calculate balance amount
+      const balanceAmount = totalAmountWithProfit - advanceAmount;
+
+      console.log(`Processing order ${order.order_id}: Estimated: ${estimatedAmount}, Profit: ${profitPercentage}%, Quantity: ${quantity}`);
+      console.log(`Price per unit: ${pricePerUnit}, Total with profit: ${totalAmountWithProfit}, Advance: ${advanceAmount}, Balance: ${balanceAmount}`);
+
+      // Check if our calculation matches the SQL calculation
+      if (Math.abs(totalAmountWithProfit - parseFloat(order.total_amount_with_profit)) > 0.01) {
+        console.log(`Warning: JavaScript calculation (${totalAmountWithProfit}) differs from SQL calculation (${order.total_amount_with_profit}). Using JavaScript calculation.`);
+      }
+
+      if (Math.abs(balanceAmount - parseFloat(order.balance_amount)) > 0.01) {
+        console.log(`Warning: JavaScript balance (${balanceAmount}) differs from SQL balance (${order.balance_amount}). Using JavaScript calculation.`);
+      }
+
+      return {
+        ...order,
+        total_amount_with_profit: totalAmountWithProfit,
+        balance_amount: balanceAmount
+      };
+    });
+
     // Log detailed information about each order for debugging
-    results.forEach(order => {
+    processedResults.forEach(order => {
       console.log(`Order ID: ${order.order_id}, Reference: ${order.order_reference}`);
-      console.log(`  Estimated Amount: ${order.estimated_amount}, Advance Amount: ${order.advance_amount}`);
+      console.log(`  Estimated Amount: ${order.estimated_amount}, Profit: ${order.profit_percentage}%, Quantity: ${order.quantity}`);
+      console.log(`  Total Amount with Profit: ${order.total_amount_with_profit}, Advance Amount: ${order.advance_amount}`);
       console.log(`  Balance Amount: ${order.balance_amount}, Payment Status: ${order.payment_status}`);
     });
 
-    res.json(results || []);
+    res.json(processedResults || []);
   });
 });
 

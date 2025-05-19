@@ -74,13 +74,13 @@ const AttendanceChart = () => {
           />
           <Bar
             dataKey="Mahiyangana"
-            fill="#BE5985"
+            fill="#D4AF37" // Metallic gold
             legendType="circle"
             radius={[10, 10, 0, 0]}
           />
           <Bar
             dataKey="MahaOya"
-            fill="#AA60C8"
+            fill="#B8860B" // Dark goldenrod
             legendType="circle"
             radius={[10, 10, 0, 0]}
           />

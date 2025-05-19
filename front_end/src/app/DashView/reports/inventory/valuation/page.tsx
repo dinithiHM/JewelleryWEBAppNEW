@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { PieChart, Filter, Download, Printer, ArrowLeft, RefreshCw } from 'lucide-react';
 import Link from 'next/link';
-import { getInventoryValuationReport } from '@/services/reportService';
+import { getInventoryValuationReport, exportReportCSV, exportReportPDF } from '@/services/reportService';
 import { PieChart as RechartsPieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from 'recharts';
 
 interface Branch {
@@ -52,6 +52,8 @@ export default function InventoryValuationReportPage() {
   const [valuationData, setValuationData] = useState<ValuationData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedBranch, setSelectedBranch] = useState<number | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState<string>('');
+  const [isExporting, setIsExporting] = useState(false);
 
   // Format currency
   const formatCurrency = (amount: number) => {
@@ -92,8 +94,13 @@ export default function InventoryValuationReportPage() {
   // Prepare category pie chart data
   const prepareCategoryChartData = () => {
     if (!valuationData?.categories) return [];
-    
-    return valuationData.categories.map(category => ({
+
+    // Use filtered categories if a category is selected
+    const categoriesToUse = selectedCategory
+      ? valuationData.categories.filter(cat => cat.category === selectedCategory)
+      : valuationData.categories;
+
+    return categoriesToUse.map(category => ({
       name: category.category,
       value: category.totalSellingValue
     }));
@@ -102,7 +109,7 @@ export default function InventoryValuationReportPage() {
   // Prepare branch pie chart data
   const prepareBranchChartData = () => {
     if (!valuationData?.branchValuation) return [];
-    
+
     return valuationData.branchValuation.map(branch => ({
       name: branch.branch_name,
       value: branch.totalSellingValue
@@ -113,6 +120,88 @@ export default function InventoryValuationReportPage() {
   const calculateProfitMargin = (sellingValue: number, costValue: number) => {
     if (costValue === 0) return 0;
     return ((sellingValue - costValue) / sellingValue) * 100;
+  };
+
+  // Get filtered categories based on selected category
+  const getFilteredCategories = () => {
+    if (!valuationData?.categories) return [];
+
+    if (!selectedCategory) {
+      return valuationData.categories;
+    }
+
+    return valuationData.categories.filter(
+      category => category.category === selectedCategory
+    );
+  };
+
+  // Handle export to CSV
+  const handleExportCSV = async () => {
+    try {
+      setIsExporting(true);
+
+      // Create params object with filters
+      const params: any = {};
+      if (selectedBranch) {
+        params.branchId = selectedBranch;
+      }
+
+      // If category filter is active, pass the filtered data directly
+      if (selectedCategory) {
+        // Store filtered data in window object for CSV generation
+        (window as any).filteredValuationData = getFilteredCategories();
+        params.useFilteredData = true;
+        params.categoryFilter = selectedCategory;
+      }
+
+      await exportReportCSV('valuation', params);
+    } catch (err) {
+      console.error('Error exporting CSV:', err);
+      setError('Failed to export CSV. Please try again.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  // Handle export to PDF
+  const handleExportPDF = async () => {
+    try {
+      setIsExporting(true);
+
+      // Create params object with filters
+      const params: any = {};
+      if (selectedBranch) {
+        params.branchId = selectedBranch;
+      }
+
+      // If category filter is active, pass the filtered data directly
+      if (selectedCategory) {
+        // Store filtered data in window object for PDF generation
+        (window as any).filteredValuationData = getFilteredCategories();
+        params.useFilteredData = true;
+        params.categoryFilter = selectedCategory;
+
+        // Store chart data for PDF generation
+        (window as any).chartData = prepareCategoryChartData().filter(
+          item => item.name === selectedCategory
+        );
+      } else {
+        // Store all chart data
+        (window as any).chartData = prepareCategoryChartData();
+      }
+
+      await exportReportPDF('valuation', params);
+    } catch (err) {
+      console.error('Error exporting PDF:', err);
+      setError('Failed to export PDF. Please try again.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  // Handle print
+  const handlePrint = () => {
+    window.print();
   };
 
   return (
@@ -138,18 +227,35 @@ export default function InventoryValuationReportPage() {
             )}
             Refresh
           </button>
-          <button className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500">
+          <button
+            onClick={handlePrint}
+            className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500"
+          >
             <Printer className="h-4 w-4 mr-2" />
             Print
           </button>
-          <button className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500">
+          <div className="relative inline-block text-left">
+            <button
+              onClick={handleExportPDF}
+              disabled={isExporting}
+              className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500"
+            >
+              <Download className="h-4 w-4 mr-2" />
+              {isExporting ? 'Exporting...' : 'Export PDF'}
+            </button>
+          </div>
+          <button
+            onClick={handleExportCSV}
+            disabled={isExporting}
+            className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500"
+          >
             <Download className="h-4 w-4 mr-2" />
-            Export
+            {isExporting ? 'Exporting...' : 'Export CSV'}
           </button>
         </div>
       </div>
 
-      {/* Branch Filter */}
+      {/* Filters */}
       <div className="bg-white shadow rounded-lg p-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
@@ -166,6 +272,24 @@ export default function InventoryValuationReportPage() {
               {valuationData?.branches.map((branch) => (
                 <option key={branch.branch_id} value={branch.branch_id}>
                   {branch.branch_name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label htmlFor="category-filter" className="block text-sm font-medium text-gray-700 mb-1">
+              Category
+            </label>
+            <select
+              id="category-filter"
+              className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-yellow-500 focus:border-yellow-500 sm:text-sm rounded-md"
+              value={selectedCategory}
+              onChange={(e) => setSelectedCategory(e.target.value)}
+            >
+              <option value="">All Categories</option>
+              {valuationData?.categories.map((category, index) => (
+                <option key={index} value={category.category}>
+                  {category.category}
                 </option>
               ))}
             </select>
@@ -201,7 +325,7 @@ export default function InventoryValuationReportPage() {
                 </div>
               </div>
             </div>
-            
+
             <div className="bg-white shadow rounded-lg p-6">
               <div className="flex items-center">
                 <div className="flex-shrink-0 bg-purple-100 rounded-md p-3">
@@ -214,7 +338,7 @@ export default function InventoryValuationReportPage() {
                 </div>
               </div>
             </div>
-            
+
             <div className="bg-white shadow rounded-lg p-6">
               <div className="flex items-center">
                 <div className="flex-shrink-0 bg-purple-100 rounded-md p-3">
@@ -233,11 +357,11 @@ export default function InventoryValuationReportPage() {
 
           {/* Category Valuation */}
           <div className="bg-white shadow rounded-lg overflow-hidden">
-            <div className="px-4 py-5 sm:px-6">
+            <div className="px-4 py-5 sm:px-6 border-b border-gray-200">
               <h3 className="text-lg leading-6 font-medium text-gray-900">Valuation by Category</h3>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4">
-              <div className="overflow-x-auto">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-6">
+              <div className="overflow-x-auto bg-white rounded-lg shadow-sm border border-gray-100">
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
@@ -256,7 +380,7 @@ export default function InventoryValuationReportPage() {
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {valuationData.categories.map((category, index) => (
+                    {getFilteredCategories().map((category, index) => (
                       <tr key={index} className="hover:bg-gray-50">
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                           {category.category}
@@ -275,7 +399,7 @@ export default function InventoryValuationReportPage() {
                   </tbody>
                 </table>
               </div>
-              <div className="h-80">
+              <div className="h-80 bg-white rounded-lg shadow-sm border border-gray-100 p-4">
                 <ResponsiveContainer width="100%" height="100%">
                   <RechartsPieChart>
                     <Pie
@@ -288,7 +412,7 @@ export default function InventoryValuationReportPage() {
                       dataKey="value"
                       label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
                     >
-                      {prepareCategoryChartData().map((entry, index) => (
+                      {prepareCategoryChartData().map((_, index) => (
                         <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                       ))}
                     </Pie>
@@ -303,11 +427,11 @@ export default function InventoryValuationReportPage() {
           {/* Branch Valuation (only if no branch filter) */}
           {!selectedBranch && valuationData.branchValuation.length > 0 && (
             <div className="bg-white shadow rounded-lg overflow-hidden">
-              <div className="px-4 py-5 sm:px-6">
+              <div className="px-4 py-5 sm:px-6 border-b border-gray-200">
                 <h3 className="text-lg leading-6 font-medium text-gray-900">Valuation by Branch</h3>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4">
-                <div className="overflow-x-auto">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-6">
+                <div className="overflow-x-auto bg-white rounded-lg shadow-sm border border-gray-100">
                   <table className="min-w-full divide-y divide-gray-200">
                     <thead className="bg-gray-50">
                       <tr>
@@ -345,7 +469,7 @@ export default function InventoryValuationReportPage() {
                     </tbody>
                   </table>
                 </div>
-                <div className="h-80">
+                <div className="h-80 bg-white rounded-lg shadow-sm border border-gray-100 p-4">
                   <ResponsiveContainer width="100%" height="100%">
                     <RechartsPieChart>
                       <Pie
@@ -358,7 +482,7 @@ export default function InventoryValuationReportPage() {
                         dataKey="value"
                         label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
                       >
-                        {prepareBranchChartData().map((entry, index) => (
+                        {prepareBranchChartData().map((_, index) => (
                           <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                         ))}
                       </Pie>

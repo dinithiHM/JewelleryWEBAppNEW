@@ -302,7 +302,7 @@ const FinanceChart = () => {
                 type="monotone"
                 dataKey="income"
                 name="Income"
-                stroke="#AA60C8"
+                stroke="#D4AF37" // Metallic gold
                 strokeWidth={3}
                 activeDot={{ r: 8 }}
               />
@@ -310,7 +310,7 @@ const FinanceChart = () => {
                 type="monotone"
                 dataKey="expense"
                 name="Expense"
-                stroke="#BE5985"
+                stroke="#B8860B" // Dark goldenrod
                 strokeWidth={3}
               />
             </LineChart>
@@ -345,8 +345,8 @@ const FinanceChart = () => {
                 verticalAlign="top"
                 wrapperStyle={{ paddingTop: "10px", paddingBottom: "10px" }}
               />
-              <Bar dataKey="income" name="Income" fill="#F3C623" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="expense" name="Expense" fill="#F2CD5C" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="income" name="Income" fill="#D4AF37" radius={[4, 4, 0, 0]} /> {/* Metallic gold */}
+              <Bar dataKey="expense" name="Expense" fill="#B8860B" radius={[4, 4, 0, 0]} /> {/* Dark goldenrod */}
             </BarChart>
           )}
         </ResponsiveContainer>
@@ -396,7 +396,7 @@ const FinanceChart = () => {
                   <p className="text-lg font-bold">{formatCurrency(branchTotal)}</p>
                   <div className="w-full bg-gray-200 rounded-full h-2 mt-1">
                     <div
-                      className="bg-yellow-500 h-2 rounded-full"
+                      className="bg-[#D4AF37] h-2 rounded-full" /* Metallic gold */
                       style={{ width: `${percentage}%` }}
                     ></div>
                   </div>
