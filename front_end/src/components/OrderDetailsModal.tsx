@@ -127,10 +127,21 @@ const OrderDetailsModal = ({ order, supplierName, supplierPhone = 'Not available
       setPaymentError(null);
 
       try {
+        // First try the supplier-payments endpoint (which returns {success, data} format)
         const response = await fetch(`http://localhost:3002/supplier-payments/order/${order.order_id}`);
 
         if (!response.ok) {
-          throw new Error(`Failed to fetch payment history: ${response.status}`);
+          // If that fails, try the supplier-payment endpoint (which returns array format)
+          console.log('First endpoint failed, trying fallback endpoint');
+          const fallbackResponse = await fetch(`http://localhost:3002/supplier-payment/order/${order.order_id}`);
+
+          if (!fallbackResponse.ok) {
+            throw new Error(`Failed to fetch payment history: ${fallbackResponse.status}`);
+          }
+
+          const fallbackData = await fallbackResponse.json();
+          setPaymentHistory(Array.isArray(fallbackData) ? fallbackData : []);
+          return;
         }
 
         const data = await response.json();
@@ -292,7 +303,18 @@ const OrderDetailsModal = ({ order, supplierName, supplierPhone = 'Not available
 
                 <div>
                   <p className="text-sm text-gray-500">Gold Provided</p>
-                  <p className="font-medium">{order.offer_gold ? 'Yes' : 'No'}</p>
+                  <p className={`font-medium ${order.offer_gold ? 'text-green-600' : 'text-gray-700'}`}>
+                    {order.offer_gold ? 'Yes' : 'No'}
+                  </p>
+                  {order.items && order.items.length > 0 ? (
+                    <p className="text-xs text-gray-500">
+                      {order.items.some(item => item.offer_gold === 1) && order.items.some(item => item.offer_gold !== 1)
+                        ? 'Gold offered for some items only'
+                        : 'See item details for gold specifications'}
+                    </p>
+                  ) : order.offer_gold ? (
+                    <p className="text-xs text-gray-500">See item details for gold specifications</p>
+                  ) : null}
                 </div>
 
                 <div>
@@ -522,22 +544,38 @@ const OrderDetailsModal = ({ order, supplierName, supplierPhone = 'Not available
                         </div>
                       </div>
 
-                      {/* Selected Karats (if gold is provided) */}
-                      {item.offer_gold === 1 && item.selected_karats && (
-                        <div className="mb-4">
-                          <h4 className="text-md font-medium mb-2">Selected Karats</h4>
-                          <div className="flex flex-wrap gap-2">
-                            {(typeof item.selected_karats === 'string' ?
-                              JSON.parse(item.selected_karats) :
-                              item.selected_karats).map((karat: string, idx: number) => (
-                              <span key={idx} className="px-2 py-1 bg-white border border-gray-200 rounded text-sm">
-                                {karat} ({item.karat_values && typeof item.karat_values === 'string' ?
-                                  (JSON.parse(item.karat_values)[karat] || 0) : 0}g)
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
+                      {/* Offered Gold Information */}
+                      <div className="mb-4">
+                        <h4 className="text-md font-medium mb-2">Offered Gold</h4>
+                        {item.offer_gold === 1 ? (
+                          <>
+                            <p className="text-green-600 font-medium mb-2">Gold was offered for this item</p>
+                            {item.selected_karats && (
+                              <div>
+                                <h5 className="text-sm font-medium mb-1">Selected Karats</h5>
+                                <div className="flex flex-wrap gap-2">
+                                  {(typeof item.selected_karats === 'string' ?
+                                    JSON.parse(item.selected_karats) :
+                                    item.selected_karats).map((karat: string, idx: number) => (
+                                    <span key={idx} className="px-2 py-1 bg-white border border-gray-200 rounded text-sm">
+                                      {karat} ({item.karat_values && typeof item.karat_values === 'string' ?
+                                        (JSON.parse(item.karat_values)[karat] || 0) : 0}g)
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            {item.offered_gold_value && (
+                              <div className="mt-2">
+                                <p className="text-sm text-gray-500">Offered Gold Value</p>
+                                <p className="font-medium">Rs. {Number(item.offered_gold_value).toLocaleString()}</p>
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <p className="text-gray-500">No gold was offered for this item</p>
+                        )}
+                      </div>
 
                       {/* Price Breakdown */}
                       <div>
@@ -565,6 +603,16 @@ const OrderDetailsModal = ({ order, supplierName, supplierPhone = 'Not available
                             </p>
                             <p className="text-xs text-gray-500">For copper, other metals</p>
                           </div>
+
+                          {item.offer_gold === 1 && item.offered_gold_value > 0 && (
+                            <div>
+                              <p className="text-sm text-gray-500">Offered Gold Value (Deduction)</p>
+                              <p className="font-medium text-green-600">
+                                - {`Rs. ${Number(item.offered_gold_value).toLocaleString()}`}
+                              </p>
+                              <p className="text-xs text-gray-500">Value of gold provided by customer</p>
+                            </div>
+                          )}
 
                           <div>
                             <p className="text-sm text-gray-500">

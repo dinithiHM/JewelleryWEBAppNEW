@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { BarChart, Users, ShoppingCart, Tag, Coins } from 'lucide-react';
+import { ShoppingCart, Tag, Coins } from 'lucide-react';
 import { useLanguage } from "@/contexts/LanguageContext";
 import TranslatedText from "@/components/TranslatedText";
 import axios from 'axios';
@@ -195,56 +195,32 @@ const SalesAssociatePage: React.FC = () => {
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="bg-white p-6 rounded-lg shadow-md">
-                    <h2 className="text-xl font-bold mb-4">Top Selling Items</h2>
-                    <div className="space-y-4">
-                        {isLoading ? (
-                            <div className="text-center py-4">Loading top selling items...</div>
-                        ) : topSellingItems.length > 0 ? (
-                            topSellingItems.map((item, index) => (
-                                <div key={item.item_id} className="flex justify-between items-center">
-                                    <div className="flex items-center">
-                                        <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center mr-4">
-                                            <span className="text-blue-500 font-bold">{index + 1}</span>
-                                        </div>
-                                        <div>
-                                            <p className="font-medium">{item.product_title}</p>
-                                            <p className="text-sm text-gray-500">
-                                                {item.category}
-                                                {item.gold_carat ? ` • ${item.gold_carat}K Gold` : ''}
-                                            </p>
-                                        </div>
+            <div className="bg-white p-6 rounded-lg shadow-md">
+                <h2 className="text-xl font-bold mb-4">Top Selling Items</h2>
+                <div className="space-y-4">
+                    {isLoading ? (
+                        <div className="text-center py-4">Loading top selling items...</div>
+                    ) : topSellingItems.length > 0 ? (
+                        topSellingItems.map((item, index) => (
+                            <div key={item.item_id} className="flex justify-between items-center">
+                                <div className="flex items-center">
+                                    <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center mr-4">
+                                        <span className="text-blue-500 font-bold">{index + 1}</span>
                                     </div>
-                                    <p className="font-bold">LKR {parseFloat(item.total_amount).toLocaleString()}</p>
+                                    <div>
+                                        <p className="font-medium">{item.product_title}</p>
+                                        <p className="text-sm text-gray-500">
+                                            {item.category}
+                                            {item.gold_carat ? ` • ${item.gold_carat}K Gold` : ''}
+                                        </p>
+                                    </div>
                                 </div>
-                            ))
-                        ) : (
-                            <div className="text-center py-4">No sales data available</div>
-                        )}
-                    </div>
-                </div>
-
-                <div className="bg-white p-6 rounded-lg shadow-md">
-                    <h2 className="text-xl font-bold mb-4">Quick Actions</h2>
-                    <div className="grid grid-cols-2 gap-4">
-                        <button className="p-4 bg-blue-50 rounded-lg flex flex-col items-center justify-center hover:bg-blue-100 transition duration-200">
-                            <ShoppingCart className="text-blue-500 mb-2" size={24} />
-                            <span className="text-sm font-medium">New Sale</span>
-                        </button>
-                        <button className="p-4 bg-green-50 rounded-lg flex flex-col items-center justify-center hover:bg-green-100 transition duration-200">
-                            <Users className="text-green-500 mb-2" size={24} />
-                            <span className="text-sm font-medium">Add Customer</span>
-                        </button>
-                        <button className="p-4 bg-purple-50 rounded-lg flex flex-col items-center justify-center hover:bg-purple-100 transition duration-200">
-                            <Tag className="text-purple-500 mb-2" size={24} />
-                            <span className="text-sm font-medium">Check Inventory</span>
-                        </button>
-                        <button className="p-4 bg-yellow-50 rounded-lg flex flex-col items-center justify-center hover:bg-yellow-100 transition duration-200">
-                            <BarChart className="text-yellow-500 mb-2" size={24} />
-                            <span className="text-sm font-medium">Daily Report</span>
-                        </button>
-                    </div>
+                                <p className="font-bold">LKR {parseFloat(item.total_amount).toLocaleString()}</p>
+                            </div>
+                        ))
+                    ) : (
+                        <div className="text-center py-4">No sales data available</div>
+                    )}
                 </div>
             </div>
         </div>

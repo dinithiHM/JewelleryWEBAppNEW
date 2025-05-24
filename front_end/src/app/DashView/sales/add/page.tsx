@@ -726,11 +726,26 @@ const AddSalePage = () => {
     setSaleItems(updatedItems);
   };
 
+  // Validate name (no numeric values)
+  const validateName = (name: string): boolean => {
+    // Check if name contains any digits
+    if (/\d/.test(name)) {
+      return false;
+    }
+    return true;
+  };
+
   // Handle form submission
   const handleSubmit = async () => {
     // Validate form
     if (!customerName.trim()) {
       setError('Please enter customer name');
+      return;
+    }
+
+    // Validate that customer name doesn't contain numbers
+    if (!validateName(customerName)) {
+      setError('Customer name should not contain numbers');
       return;
     }
 

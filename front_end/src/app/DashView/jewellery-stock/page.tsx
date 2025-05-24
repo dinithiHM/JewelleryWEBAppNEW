@@ -346,12 +346,18 @@ const JewelleryStockPage = () => {
 
   // Handle edit item
   const handleEditItem = (item: JewelleryItem) => {
-    setCurrentItem(item);
-    setProductTitle(item.product_title);
-    setCategory(item.category_name || item.category);
-    setInStock(item.in_stock);
-    setBuyingPrice(item.buying_price);
-    setSellingPrice(item.selling_price);
+    console.log('Editing item:', JSON.stringify(item, null, 2));
+
+    // Store the complete item object
+    setCurrentItem({...item});
+
+    // Set individual form fields
+    console.log('Setting product title to:', item.product_title);
+    setProductTitle(item.product_title || '');
+    setCategory(item.category_name || item.category || '');
+    setInStock(item.in_stock || 0);
+    setBuyingPrice(item.buying_price || 0);
+    setSellingPrice(item.selling_price || 0);
     if (item.branch_id) {
       setUserBranchId(item.branch_id);
     }
@@ -456,6 +462,11 @@ const JewelleryStockPage = () => {
   const handleSubmitForm = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    console.log('Form submission started');
+    console.log('Current form mode:', formMode);
+    console.log('Current item ID:', currentItem?.item_id);
+    console.log('Product title value:', productTitle);
+
     // Validate form
     if (!productTitle || !category || inStock < 0 || buyingPrice <= 0 || sellingPrice <= 0 || !userBranchId) {
       alert('Please fill all fields with valid values');
@@ -478,13 +489,14 @@ const JewelleryStockPage = () => {
       additional_materials_charges: additionalMaterialsCharges
     };
 
-    console.log('Submitting jewellery item data:', itemData);
+    console.log('Submitting jewellery item data:', JSON.stringify(itemData, null, 2));
 
     try {
       let response;
 
       if (formMode === 'add') {
         // Create new item
+        console.log('Creating new jewellery item');
         response = await fetch('http://localhost:3002/jewellery-items/create', {
           method: 'POST',
           headers: {
@@ -494,7 +506,15 @@ const JewelleryStockPage = () => {
         });
       } else {
         // Update existing item
-        response = await fetch(`http://localhost:3002/jewellery-items/update/${currentItem?.item_id}`, {
+        console.log(`Updating jewellery item with ID: ${currentItem?.item_id}`);
+
+        if (!currentItem?.item_id) {
+          console.error('Error: Missing item ID for update operation');
+          alert('Cannot update item: Missing item ID');
+          return;
+        }
+
+        response = await fetch(`http://localhost:3002/jewellery-items/update/${currentItem.item_id}`, {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json'
@@ -503,9 +523,16 @@ const JewelleryStockPage = () => {
         });
       }
 
+      console.log('Response status:', response.status);
+
       if (!response.ok) {
-        throw new Error(`Failed to ${formMode} item`);
+        const errorText = await response.text();
+        console.error('Error response:', errorText);
+        throw new Error(`Failed to ${formMode} item: ${response.status} ${errorText}`);
       }
+
+      const responseData = await response.json();
+      console.log('Response data:', responseData);
 
       // Refresh the list with branch filtering
       let fetchUrl = 'http://localhost:3002/jewellery-items';
@@ -569,6 +596,23 @@ const JewelleryStockPage = () => {
       }
 
       alert(`Item ${formMode === 'add' ? 'added' : 'updated'} successfully`);
+
+      // Clear form state
+      setCurrentItem(null);
+      setProductTitle('');
+      setCategory('');
+      setInStock(0);
+      setBuyingPrice(0);
+      setSellingPrice(0);
+      setProfitPercentage(0);
+      setGoldCarat(null);
+      setWeight(null);
+      setAssayCertificate('');
+      setIsSolidGold(true);
+      setMakingCharges(null);
+      setAdditionalMaterialsCharges(null);
+
+      // Close the form
       setShowForm(false);
 
       // Reset the source order ID and isAddingFromOrder flag
@@ -582,11 +626,27 @@ const JewelleryStockPage = () => {
 
   // Cancel form
   const handleCancelForm = () => {
+    console.log('Cancelling form');
     setShowForm(false);
 
     // Reset the source order ID and isAddingFromOrder flag
     setSourceOrderId(null);
     setIsAddingFromOrder(false);
+
+    // Clear form state
+    setCurrentItem(null);
+    setProductTitle('');
+    setCategory('');
+    setInStock(0);
+    setBuyingPrice(0);
+    setSellingPrice(0);
+    setProfitPercentage(0);
+    setGoldCarat(null);
+    setWeight(null);
+    setAssayCertificate('');
+    setIsSolidGold(true);
+    setMakingCharges(null);
+    setAdditionalMaterialsCharges(null);
   };
 
   // View item details
@@ -939,7 +999,11 @@ const JewelleryStockPage = () => {
                     type="text"
                     className="w-full p-2 border border-gray-300 rounded-md"
                     value={productTitle}
-                    onChange={(e) => setProductTitle(e.target.value)}
+                    onChange={(e) => {
+                      const newTitle = e.target.value;
+                      console.log('Product title changed to:', newTitle);
+                      setProductTitle(newTitle);
+                    }}
                     required
                   />
                 </div>

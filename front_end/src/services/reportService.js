@@ -335,16 +335,80 @@ export const exportReportPDF = async (reportType, params = {}, chartRef = null) 
         userName = response.data.generatedBy;
       } else {
         // Fallback to localStorage if server didn't provide a name
-        const userInfo = JSON.parse(localStorage.getItem('userInfo')) || { name: 'System User' };
-        console.log('Using localStorage user name:', userInfo.name);
-        userName = userInfo.name;
+        // Try to get the user name from different possible localStorage keys
+        let userInfo;
+        try {
+          // First try the 'user' object which is the main storage method
+          userInfo = JSON.parse(localStorage.getItem('user'));
+          if (userInfo && userInfo.name && userInfo.name !== 'Administrator') {
+            console.log('Using user.name from localStorage:', userInfo.name);
+            userName = userInfo.name;
+          }
+          // If no name or it's just "Administrator", try userName directly
+          else {
+            const directUserName = localStorage.getItem('userName');
+            if (directUserName && directUserName !== 'Administrator') {
+              console.log('Using userName directly from localStorage:', directUserName);
+              userName = directUserName;
+            }
+            // If still no valid name, try userInfo
+            else {
+              const userInfoObj = JSON.parse(localStorage.getItem('userInfo'));
+              if (userInfoObj && userInfoObj.userName && userInfoObj.userName !== 'Administrator') {
+                console.log('Using userInfo.userName from localStorage:', userInfoObj.userName);
+                userName = userInfoObj.userName;
+              }
+              // If all else fails, use the role as a fallback
+              else {
+                const role = localStorage.getItem('role');
+                if (role) {
+                  userName = role;
+                } else {
+                  userName = 'System User';
+                }
+              }
+            }
+          }
+        } catch (error) {
+          console.error('Error parsing user info from localStorage:', error);
+          userName = 'System User';
+        }
       }
     } else {
       // If no response object (using filtered data), get user info from localStorage
       try {
-        const userInfo = JSON.parse(localStorage.getItem('userInfo')) || { name: 'System User' };
-        console.log('Using localStorage user name:', userInfo.name);
-        userName = userInfo.name;
+        // Try to get the user name from different possible localStorage keys
+        // First try the 'user' object which is the main storage method
+        const userInfo = JSON.parse(localStorage.getItem('user'));
+        if (userInfo && userInfo.name && userInfo.name !== 'Administrator') {
+          console.log('Using user.name from localStorage:', userInfo.name);
+          userName = userInfo.name;
+        }
+        // If no name or it's just "Administrator", try userName directly
+        else {
+          const directUserName = localStorage.getItem('userName');
+          if (directUserName && directUserName !== 'Administrator') {
+            console.log('Using userName directly from localStorage:', directUserName);
+            userName = directUserName;
+          }
+          // If still no valid name, try userInfo
+          else {
+            const userInfoObj = JSON.parse(localStorage.getItem('userInfo'));
+            if (userInfoObj && userInfoObj.userName && userInfoObj.userName !== 'Administrator') {
+              console.log('Using userInfo.userName from localStorage:', userInfoObj.userName);
+              userName = userInfoObj.userName;
+            }
+            // If all else fails, use the role as a fallback
+            else {
+              const role = localStorage.getItem('role');
+              if (role) {
+                userName = role;
+              } else {
+                userName = 'System User';
+              }
+            }
+          }
+        }
       } catch (error) {
         console.error('Error getting user info from localStorage:', error);
         userName = 'System User';

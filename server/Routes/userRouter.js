@@ -199,6 +199,47 @@ router.post("/reset-password/:id", async (req, res) => {
         return res.status(400).json({ message: "Current password and new password are required" });
     }
 
+    // Validate password strength
+    const validatePassword = (password) => {
+        const errors = [];
+
+        // Check minimum length
+        if (password.length < 6) {
+            errors.push("Password must be at least 6 characters long");
+        }
+
+        // Check for uppercase letters
+        if (!/[A-Z]/.test(password)) {
+            errors.push("Password must contain at least one uppercase letter");
+        }
+
+        // Check for lowercase letters
+        if (!/[a-z]/.test(password)) {
+            errors.push("Password must contain at least one lowercase letter");
+        }
+
+        // Check for numbers
+        if (!/[0-9]/.test(password)) {
+            errors.push("Password must contain at least one number");
+        }
+
+        // Check for special characters
+        if (!/[!@#$%^&*(),.?":{}|<>]/.test(password)) {
+            errors.push("Password must contain at least one special character");
+        }
+
+        return errors;
+    };
+
+    // Validate the password
+    const validationErrors = validatePassword(newPassword);
+    if (validationErrors.length > 0) {
+        return res.status(400).json({
+            message: 'Password does not meet security requirements',
+            errors: validationErrors
+        });
+    }
+
     // Get user from database
     const getUserSql = "SELECT * FROM users WHERE user_id = ?";
 

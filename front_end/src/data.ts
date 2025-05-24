@@ -18,13 +18,13 @@ export const featuredProducts: Products = [
   },
   {
     id: 2,
-    title: "Wedding Earings",
+    title: "Barath Necklace",
     desc: "Step into the spotlight with earrings that steal the show! ✨🎉 Perfectly designed for every unforgettable party moment",
     img: "/11.jpg",
   },
   {
     id: 3,
-    title: "Wedding Earings",
+    title: "Cluster Earings",
     desc: "Step into the spotlight with earrings that steal the show! ✨🎉 Perfectly designed for every unforgettable party moment",
     img: "/25.jpg",
   },

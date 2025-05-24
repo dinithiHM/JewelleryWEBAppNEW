@@ -348,17 +348,6 @@ const SaleDetailsPage = ({ params }: { params: { id: string } }) => {
           </div>
         </div>
       </div>
-
-      {/* Floating action button for download */}
-      <button
-        className="fixed bottom-8 right-8 bg-yellow-400 hover:bg-yellow-500 text-black font-bold p-4 rounded-full shadow-lg flex items-center"
-        onClick={handleDownloadInvoice}
-        disabled={generatingInvoice}
-        title="Download Invoice"
-      >
-        <Download size={24} className="mr-2" />
-        {generatingInvoice ? 'Generating...' : 'Download Invoice'}
-      </button>
     </div>
   );
 };

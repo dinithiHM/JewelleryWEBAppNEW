@@ -5,9 +5,17 @@ import { z } from "zod";
 import { useState, useEffect } from "react";
 
 const SupplierForm = ({ type, data }: { type: "create" | "update"; data?: any }) => {
+  // Custom validation for name fields (no numeric values)
+  const nameValidator = (fieldName: string) =>
+    z.string()
+      .min(1, { message: `${fieldName} is required!` })
+      .refine(value => !/\d/.test(value), {
+        message: `${fieldName} should not contain numbers`
+      });
+
   // Zod schema for form validation
   const schema = z.object({
-    name: z.string().min(1, { message: "Supplier name is required!" }),
+    name: nameValidator("Supplier name"),
     address: z.string().min(1, { message: "Address is required!" }),
     contact_no: z.string().min(1, { message: "Contact number is required!" }),
     manufacturing_items: z.string().min(1, { message: "Manufacturing items are required!" }),

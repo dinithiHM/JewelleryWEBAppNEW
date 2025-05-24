@@ -51,7 +51,7 @@ const saveBase64Image = (base64String, orderId) => {
 const router = express.Router();
 
 // Create a new custom order without file upload
-router.post("/create", (req, res) => {
+router.post("/create", async (req, res) => {
   console.log('POST /custom-orders/create - Creating new custom order');
   console.log('Request body:', req.body);
 
@@ -83,9 +83,44 @@ router.post("/create", (req, res) => {
     return res.status(400).json({ message: "Customer name and estimated amount are required" });
   }
 
-  // Generate order reference
-  const order_reference = generateOrderReference('CUST');
-  console.log('Generated order reference:', order_reference);
+  // Generate sequential order reference (CUST-YYYY-XXXX)
+  const year = new Date().getFullYear();
+  const referencePrefix = `CUST-${year}-`;
+
+  // Get the next sequence number
+  const sequenceQuery = `
+    SELECT MAX(SUBSTRING_INDEX(order_reference, '-', -1)) as max_seq
+    FROM custom_orders
+    WHERE order_reference LIKE ?
+  `;
+
+  // Use a Promise to handle the async database query
+  const getOrderReference = () => {
+    return new Promise((resolve) => {
+      con.query(sequenceQuery, [`${referencePrefix}%`], (err, results) => {
+        if (err) {
+          console.error("Error generating order reference:", err);
+          // Fall back to random reference if query fails
+          const fallbackReference = generateOrderReference('CUST');
+          console.log('Failed to generate sequential reference, using fallback:', fallbackReference);
+          resolve(fallbackReference);
+          return;
+        }
+
+        let nextSeq = 1;
+        if (results[0].max_seq) {
+          nextSeq = parseInt(results[0].max_seq) + 1;
+        }
+
+        const order_reference = `${referencePrefix}${nextSeq.toString().padStart(4, '0')}`;
+        console.log('Generated sequential order reference:', order_reference);
+        resolve(order_reference);
+      });
+    });
+  };
+
+  // Get the order reference
+  const order_reference = await getOrderReference();
 
   // Calculate total amount with profit
   const parsedEstimatedAmount = parseFloat(estimated_amount);
@@ -546,17 +581,29 @@ router.get("/", (req, res) => {
   const queryParams = [];
   const filterByBranch = req.query.filter_branch === 'true';
 
-  if (userRole === 'admin' || userRole === '') {
-    // Admin sees all orders, but can filter by branch if requested
+  console.log('User role:', userRole);
+  console.log('Branch ID:', branchId);
+  console.log('Filter by branch:', filterByBranch);
+
+  if (userRole === 'admin') {
+    // Admin sees all orders by default, but can filter by branch if requested
     if (filterByBranch && branchId) {
       sql += ` WHERE co.branch_id = ?`;
       queryParams.push(branchId);
+      console.log('Admin filtering by branch:', branchId);
+    } else {
+      console.log('Admin seeing all branches');
     }
   } else {
-    // Non-admin users can see all orders, but default filter is their branch
-    if (filterByBranch && branchId) {
+    // Non-admin users should only see their branch by default
+    if (branchId) {
       sql += ` WHERE co.branch_id = ?`;
       queryParams.push(branchId);
+      console.log('Non-admin filtering by branch:', branchId);
+    } else {
+      // Fallback to branch 1 if no branch ID is provided for non-admin
+      sql += ` WHERE co.branch_id = 1`;
+      console.log('Non-admin with no branch ID, defaulting to branch 1');
     }
   }
 

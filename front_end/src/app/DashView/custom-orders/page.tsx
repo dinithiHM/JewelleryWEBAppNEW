@@ -67,7 +67,7 @@ const CustomOrdersPage = () => {
   const [userBranchId, setUserBranchId] = useState<number | null>(null);
   const [branches, setBranches] = useState<{branch_id: number, branch_name: string}[]>([]);
   const [selectedBranchId, setSelectedBranchId] = useState<number | null>(null);
-  const [filterByBranch, setFilterByBranch] = useState<boolean>(true); // Default to filtering by branch for admin
+  const [filterByBranch, setFilterByBranch] = useState<boolean>(false); // Default to NOT filtering by branch for admin
   const [showAllBranches, setShowAllBranches] = useState<boolean>(false); // Default to showing only user's branch for non-admin
 
   // State for UI
@@ -189,18 +189,25 @@ const CustomOrdersPage = () => {
   // Fetch branches for admin filtering
   const fetchBranches = useCallback(async () => {
     try {
+      console.log('Fetching branches for dropdown...');
       const response = await fetch('http://localhost:3002/branches');
       if (response.ok) {
         const data = await response.json();
+        console.log('Fetched branches:', data);
         setBranches(data);
+      } else {
+        console.error('Failed to fetch branches:', response.status);
+        throw new Error(`Failed to fetch branches: ${response.status}`);
       }
     } catch (err) {
       console.error('Error fetching branches:', err);
       // Set default branches if fetch fails
-      setBranches([
+      const defaultBranches = [
         { branch_id: 1, branch_name: 'Mahiyangana Branch' },
         { branch_id: 2, branch_name: 'Mahaoya Branch' }
-      ]);
+      ];
+      console.log('Using default branches:', defaultBranches);
+      setBranches(defaultBranches);
     }
   }, []);
 
@@ -218,11 +225,15 @@ const CustomOrdersPage = () => {
     // Set branch ID
     const numericBranchId = branchId ? Number(branchId) : null;
     setUserBranchId(numericBranchId);
-    setSelectedBranchId(numericBranchId);
 
-    // Fetch branches if admin
+    // For admin users, don't set a selected branch by default to show all branches
     if (normalizedRole === 'admin') {
-      fetchBranches();
+      setSelectedBranchId(null); // Set to null to show all branches
+      setFilterByBranch(false); // Don't filter by branch by default for admin
+      fetchBranches(); // Fetch all branches for the dropdown
+    } else {
+      // For non-admin users, set their branch as the selected branch
+      setSelectedBranchId(numericBranchId);
     }
 
     // We'll let the other useEffect handle the initial fetch
@@ -567,7 +578,16 @@ const CustomOrdersPage = () => {
                       value={selectedBranchId || ''}
                       onChange={(e) => {
                         const value = e.target.value;
-                        setSelectedBranchId(value ? Number(value) : null);
+                        const newBranchId = value ? Number(value) : null;
+                        setSelectedBranchId(newBranchId);
+
+                        // If a branch is selected, enable branch filtering
+                        if (newBranchId) {
+                          setFilterByBranch(true);
+                        } else {
+                          setFilterByBranch(false);
+                        }
+
                         fetchOrders(true); // Refresh with new branch filter
                       }}
                     >
@@ -586,11 +606,15 @@ const CustomOrdersPage = () => {
                         checked={filterByBranch}
                         onChange={(e) => {
                           setFilterByBranch(e.target.checked);
+                          // If unchecking, reset to show all branches
+                          if (!e.target.checked) {
+                            setSelectedBranchId(null);
+                          }
                           fetchOrders(true); // Refresh with new filter setting
                         }}
                       />
                       <label htmlFor="adminFilterByBranch" className="ml-2 block text-sm text-gray-700">
-                        Filter by branch
+                        {filterByBranch ? 'Filtering by branch' : 'Showing all branches'}
                       </label>
                     </div>
                   </div>

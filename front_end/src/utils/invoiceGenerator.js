@@ -64,13 +64,13 @@ export const generateInvoicePDF = async (sale, branchDetails) => {
     doc.text(sale.customer_name, 20, 82);
 
     // Add items table with headers
-    doc.setFontSize(10);
+    doc.setFontSize(9);  // Smaller font for headers
     doc.setFont('helvetica', 'bold');
     doc.text('Details', 20, 100);
-    doc.text('QTY', 80, 100);
-    doc.text('ORIGINAL PRICE', 100, 100);
-    doc.text('DISCOUNT', 135, 100);
-    doc.text('PRICE', 160, 100);
+    doc.text('QTY', 70, 100);
+    doc.text('ORIG. PRICE', 85, 100);  // Shortened header
+    doc.text('DISC.', 120, 100);  // Shortened header
+    doc.text('UNIT', 150, 100);  // Shortened header and moved right
     doc.text('AMOUNT', 190, 100, { align: 'right' });
 
     // Draw line under headers
@@ -78,7 +78,7 @@ export const generateInvoicePDF = async (sale, branchDetails) => {
 
     // Add items
     let yPos = 110;
-    doc.setFontSize(9);
+    doc.setFontSize(7);  // Even smaller font size for better spacing
     doc.setFont('helvetica', 'normal');
 
     sale.items.forEach(item => {
@@ -86,11 +86,11 @@ export const generateInvoicePDF = async (sale, branchDetails) => {
       doc.text(item.product_title, 20, yPos);
 
       // Quantity
-      doc.text(item.quantity.toString(), 80, yPos);
+      doc.text(item.quantity.toString(), 70, yPos);
 
       // Original price (selected unit price when sale was made)
       const originalPrice = item.original_price || item.unit_price;
-      doc.text(formatCurrency(originalPrice), 100, yPos);
+      doc.text(formatCurrency(originalPrice), 85, yPos);
 
       // Discount
       let discountText = '-';
@@ -105,16 +105,16 @@ export const generateInvoicePDF = async (sale, branchDetails) => {
           discountText = formatCurrency(item.discount_amount);
         }
       }
-      doc.text(discountText, 135, yPos);
+      doc.text(discountText, 120, yPos);
 
       // Final unit price
-      doc.text(formatCurrency(item.unit_price), 160, yPos);
+      doc.text(formatCurrency(item.unit_price), 150, yPos);
 
       // Subtotal
       const correctSubtotal = item.unit_price * item.quantity;
       doc.text(formatCurrency(correctSubtotal), 190, yPos, { align: 'right' });
 
-      yPos += 8;
+      yPos += 10;  // Increased vertical spacing between rows
     });
 
     // Draw line after items

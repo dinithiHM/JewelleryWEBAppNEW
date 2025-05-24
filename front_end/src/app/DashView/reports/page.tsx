@@ -78,8 +78,7 @@ export default function ReportsPage() {
   const recentReports = [
     { name: 'Monthly Sales - April 2024', path: '/DashView/reports/sales/monthly', date: '2024-04-30' },
     { name: 'Gold Inventory Status', path: '/DashView/reports/inventory/gold-stock', date: '2024-04-28' },
-    { name: 'Customer Outstanding Payments', path: '/DashView/reports/customer/outstanding', date: '2024-04-25' },
-    { name: 'Quarterly Revenue Analysis', path: '/DashView/reports/financial/revenue', date: '2024-04-01' },
+   
   ];
 
   return (

@@ -805,7 +805,14 @@ export const getInventoryValuationReport = (req, res) => {
  */
 export const exportReportCSV = async (req, res) => {
   try {
-    const { reportType, branchId, category, format } = req.query;
+    const { reportType, branchId, category, format, period = 'last7', startDate: startDateStr, endDate: endDateStr } = req.query;
+
+    console.log('Exporting report:', reportType, 'in format:', format);
+    console.log('Query parameters:', req.query);
+
+    // Parse dates if provided
+    const startDate = startDateStr ? new Date(startDateStr) : null;
+    const endDate = endDateStr ? new Date(endDateStr) : null;
 
     // Base WHERE clause for branch filtering
     const branchFilter = branchId ? 'AND ji.branch_id = ?' : '';
@@ -820,6 +827,176 @@ export const exportReportCSV = async (req, res) => {
 
     // Get data based on report type
     switch (reportType) {
+      case 'financial':
+        // Get financial report data
+        console.log('Exporting financial report with period:', period);
+
+        // Determine date range
+        const dateRange = startDate && endDate
+          ? { startDate, endDate }
+          : getDateRange(period);
+
+        console.log('Date range for financial report:', dateRange);
+
+        // Base WHERE clause for branch filtering
+        const financialBranchFilter = branchId ? 'AND s.branch_id = ?' : '';
+        const financialBranchParams = branchId ? [branchId] : [];
+
+        // Get sales revenue
+        const salesRevenueQuery = `
+          SELECT
+            COALESCE(SUM(total_amount), 0) AS totalSalesRevenue,
+            COUNT(*) AS totalSalesCount
+          FROM sales s
+          WHERE sale_date BETWEEN ? AND ? ${financialBranchFilter}
+        `;
+
+        const [salesRevenue] = await con.promise().query(
+          salesRevenueQuery,
+          [dateRange.startDate, dateRange.endDate, ...financialBranchParams]
+        );
+
+        // Get advance payments revenue
+        const advancePaymentsQuery = `
+          SELECT
+            COALESCE(SUM(advance_amount), 0) AS totalAdvancePayments,
+            COUNT(*) AS totalAdvancePaymentsCount
+          FROM advance_payments ap
+          WHERE payment_date BETWEEN ? AND ? ${branchId ? 'AND ap.branch_id = ?' : ''}
+        `;
+
+        const [advancePayments] = await con.promise().query(
+          advancePaymentsQuery,
+          [dateRange.startDate, dateRange.endDate, ...financialBranchParams]
+        );
+
+        // Get orders revenue
+        const ordersRevenueQuery = `
+          SELECT
+            COALESCE(SUM(oi.total_amount), 0) AS totalOrdersRevenue,
+            COUNT(DISTINCT o.order_id) AS totalOrdersCount
+          FROM orders o
+          LEFT JOIN order_items oi ON o.order_id = oi.order_id
+          WHERE o.created_at BETWEEN ? AND ? ${branchId ? 'AND o.branch_id = ?' : ''}
+        `;
+
+        const [ordersRevenue] = await con.promise().query(
+          ordersRevenueQuery,
+          [dateRange.startDate, dateRange.endDate, ...financialBranchParams]
+        );
+
+        // Get revenue by day
+        const revenueByDayQuery = `
+          SELECT
+            DATE(sale_date) AS date,
+            COALESCE(SUM(total_amount), 0) AS amount
+          FROM sales s
+          WHERE sale_date BETWEEN ? AND ? ${financialBranchFilter}
+          GROUP BY DATE(sale_date)
+          ORDER BY date
+        `;
+
+        const [revenueByDay] = await con.promise().query(
+          revenueByDayQuery,
+          [dateRange.startDate, dateRange.endDate, ...financialBranchParams]
+        );
+
+        // Get revenue by payment method
+        const revenueByPaymentMethodQuery = `
+          SELECT
+            payment_method,
+            COUNT(*) AS count,
+            SUM(total_amount) AS amount
+          FROM sales s
+          WHERE sale_date BETWEEN ? AND ? ${financialBranchFilter}
+          GROUP BY payment_method
+          ORDER BY amount DESC
+        `;
+
+        const [revenueByPaymentMethod] = await con.promise().query(
+          revenueByPaymentMethodQuery,
+          [dateRange.startDate, dateRange.endDate, ...financialBranchParams]
+        );
+
+        // Get revenue by branch
+        const revenueByBranchQuery = `
+          SELECT
+            b.branch_name,
+            COUNT(s.sale_id) AS count,
+            SUM(s.total_amount) AS amount
+          FROM sales s
+          JOIN branches b ON s.branch_id = b.branch_id
+          WHERE s.sale_date BETWEEN ? AND ? ${financialBranchFilter}
+          GROUP BY b.branch_id
+          ORDER BY amount DESC
+        `;
+
+        const [revenueByBranch] = await con.promise().query(
+          revenueByBranchQuery,
+          [dateRange.startDate, dateRange.endDate, ...financialBranchParams]
+        );
+
+        // Calculate total revenue
+        const salesRevenueValue = Number(salesRevenue[0]?.totalSalesRevenue) || 0;
+        const advancePaymentsValue = Number(advancePayments[0]?.totalAdvancePayments) || 0;
+        const ordersRevenueValue = Number(ordersRevenue[0]?.totalOrdersRevenue) || 0;
+        const totalRevenue = salesRevenueValue + advancePaymentsValue + ordersRevenueValue;
+
+        // Create a flattened data structure for CSV export
+        data = [
+          {
+            report_type: 'Financial Summary',
+            period: period,
+            start_date: dateRange.startDate,
+            end_date: dateRange.endDate,
+            total_revenue: totalRevenue,
+            sales_revenue: salesRevenueValue,
+            advance_payments_revenue: advancePaymentsValue,
+            orders_revenue: ordersRevenueValue,
+            total_transactions: (Number(salesRevenue[0]?.totalSalesCount) || 0) +
+                               (Number(advancePayments[0]?.totalAdvancePaymentsCount) || 0) +
+                               (Number(ordersRevenue[0]?.totalOrdersCount) || 0),
+            sales_transactions: Number(salesRevenue[0]?.totalSalesCount) || 0,
+            advance_payments_transactions: Number(advancePayments[0]?.totalAdvancePaymentsCount) || 0,
+            orders_transactions: Number(ordersRevenue[0]?.totalOrdersCount) || 0
+          }
+        ];
+
+        // Add revenue by day data
+        revenueByDay.forEach((day, index) => {
+          data.push({
+            report_type: 'Revenue By Day',
+            date: day.date,
+            amount: day.amount,
+            index: index + 1
+          });
+        });
+
+        // Add revenue by payment method data
+        revenueByPaymentMethod.forEach((method, index) => {
+          data.push({
+            report_type: 'Revenue By Payment Method',
+            payment_method: method.payment_method,
+            count: method.count,
+            amount: method.amount,
+            index: index + 1
+          });
+        });
+
+        // Add revenue by branch data
+        revenueByBranch.forEach((branch, index) => {
+          data.push({
+            report_type: 'Revenue By Branch',
+            branch_name: branch.branch_name,
+            count: branch.count,
+            amount: branch.amount,
+            index: index + 1
+          });
+        });
+
+        filename = `financial_report_${new Date().toISOString().split('T')[0]}`;
+        break;
+
       case 'current-stock':
         // Get current stock items
         const currentStockQuery = `

@@ -24,13 +24,75 @@ const PasswordResetModal = ({ isOpen, onClose, onSubmit, userId, userName }: Pas
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
+  const [passwordStrength, setPasswordStrength] = useState(0);
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
+
+  // Function to validate password and calculate strength
+  const validatePassword = (password: string) => {
+    const errors: string[] = [];
+    let strength = 0;
+
+    // Check minimum length
+    if (password.length < 6) {
+      errors.push("Password must be at least 6 characters long");
+    } else {
+      strength += 1;
+    }
+
+    // Check for uppercase letters
+    if (!/[A-Z]/.test(password)) {
+      errors.push("Password must contain at least one uppercase letter");
+    } else {
+      strength += 1;
+    }
+
+    // Check for lowercase letters
+    if (!/[a-z]/.test(password)) {
+      errors.push("Password must contain at least one lowercase letter");
+    } else {
+      strength += 1;
+    }
+
+    // Check for numbers
+    if (!/[0-9]/.test(password)) {
+      errors.push("Password must contain at least one number");
+    } else {
+      strength += 1;
+    }
+
+    // Check for special characters
+    if (!/[!@#$%^&*(),.?":{}|<>]/.test(password)) {
+      errors.push("Password must contain at least one special character");
+    } else {
+      strength += 1;
+    }
+
+    return { errors, strength };
+  };
+
+  // Handle password change
+  const handlePasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const password = e.target.value;
+    setNewPassword(password);
+
+    if (password) {
+      const { errors, strength } = validatePassword(password);
+      setValidationErrors(errors);
+      setPasswordStrength(strength);
+    } else {
+      setValidationErrors([]);
+      setPasswordStrength(0);
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
     // Validate passwords
-    if (newPassword.length < 6) {
-      setError("Password must be at least 6 characters long");
+    const { errors } = validatePassword(newPassword);
+
+    if (errors.length > 0) {
+      setError(errors[0]); // Show the first error
       return;
     }
 
@@ -43,6 +105,8 @@ const PasswordResetModal = ({ isOpen, onClose, onSubmit, userId, userName }: Pas
     setNewPassword("");
     setConfirmPassword("");
     setError("");
+    setValidationErrors([]);
+    setPasswordStrength(0);
     onClose();
   };
 
@@ -67,10 +131,41 @@ const PasswordResetModal = ({ isOpen, onClose, onSubmit, userId, userName }: Pas
             <input
               type="password"
               value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
+              onChange={handlePasswordChange}
               className="w-full p-2 border border-gray-300 rounded"
               required
             />
+
+            {/* Password strength indicator */}
+            {newPassword && (
+              <div className="mt-2">
+                <div className="flex items-center mb-1">
+                  <div className="text-xs mr-2">Password strength:</div>
+                  <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full ${
+                        passwordStrength === 0 ? 'bg-red-500' :
+                        passwordStrength <= 2 ? 'bg-yellow-500' :
+                        passwordStrength <= 4 ? 'bg-blue-500' : 'bg-green-500'
+                      }`}
+                      style={{ width: `${(passwordStrength / 5) * 100}%` }}
+                    ></div>
+                  </div>
+                </div>
+
+                {/* Password requirements */}
+                <ul className="text-xs text-gray-600 mt-1 space-y-1">
+                  {validationErrors.map((error, index) => (
+                    <li key={index} className="text-red-500">
+                      ✗ {error}
+                    </li>
+                  ))}
+                  {validationErrors.length === 0 && newPassword && (
+                    <li className="text-green-500">✓ Password meets all requirements</li>
+                  )}
+                </ul>
+              </div>
+            )}
           </div>
 
           <div className="mb-6">
@@ -84,6 +179,9 @@ const PasswordResetModal = ({ isOpen, onClose, onSubmit, userId, userName }: Pas
               className="w-full p-2 border border-gray-300 rounded"
               required
             />
+            {newPassword && confirmPassword && newPassword !== confirmPassword && (
+              <p className="text-xs text-red-500 mt-1">Passwords do not match</p>
+            )}
           </div>
 
           <div className="flex justify-end space-x-2">
@@ -121,14 +219,24 @@ const UserActionButtons = ({ id, name, userType, currentUserRole, onDelete }: Us
         body: JSON.stringify({ password: newPassword }),
       });
 
+      const data = await response.json();
+
       if (!response.ok) {
-        throw new Error('Failed to reset password');
+        // Handle validation errors from the server
+        if (response.status === 400 && data.errors) {
+          // Show the first error message
+          alert(`Password validation failed: ${data.errors[0]}`);
+        } else {
+          // Show general error message
+          alert(data.message || 'Failed to reset password');
+        }
+        return;
       }
 
       alert('Password reset successfully');
     } catch (error) {
       console.error('Error resetting password:', error);
-      alert('Failed to reset password');
+      alert('Failed to reset password. Please try again.');
     }
   };
 

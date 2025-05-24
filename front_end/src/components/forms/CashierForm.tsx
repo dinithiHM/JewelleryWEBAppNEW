@@ -5,13 +5,21 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { useState, useEffect } from "react";
 
+// Custom validation for name fields (no numeric values)
+const nameValidator = (fieldName: string) =>
+  z.string()
+    .min(1, { message: `${fieldName} is required!` })
+    .refine(value => !/\d/.test(value), {
+      message: `${fieldName} should not contain numbers`
+    });
+
 // Zod schema for form validation
 const schema = z.object({
   username: z.string().min(3, { message: "Username must be at least 3 characters long!" }).max(50, { message: "Username must be at most 50 characters long!" }),
   email: z.string().email({ message: "Invalid email address!" }),
   password: z.string().min(8, { message: "Password must be at least 8 characters long!" }),
-  firstName: z.string().min(1, { message: "First name is required!" }),
-  lastName: z.string().min(1, { message: "Last name is required!" }),
+  firstName: nameValidator("First name"),
+  lastName: nameValidator("Last name"),
   nic: z.string().min(1, { message: "NIC is required!" }).max(20, { message: "NIC must be at most 20 characters long!" }),
   phone: z.string().min(1, { message: "Phone is required!" }),
   address: z.string().min(1, { message: "Address is required!" }),

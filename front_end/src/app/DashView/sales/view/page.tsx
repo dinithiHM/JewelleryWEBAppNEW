@@ -23,8 +23,10 @@ const ViewSalesPage = () => {
   const router = useRouter();
 
   const [sales, setSales] = useState<Sale[]>([]);
+  const [totalSalesCount, setTotalSalesCount] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [loadingCount, setLoadingCount] = useState(true);
 
   // Filtering and search
   const [searchTerm, setSearchTerm] = useState('');
@@ -38,6 +40,7 @@ const ViewSalesPage = () => {
     const fetchSales = async () => {
       try {
         setLoading(true);
+        setLoadingCount(true);
 
         // Get user role and ID from localStorage
         const userRole = localStorage.getItem('role');
@@ -69,6 +72,37 @@ const ViewSalesPage = () => {
 
         console.log('Filtering sales by branch_id:', branchId);
 
+        // Fetch total count first
+        let countUrl = 'http://localhost:3002/sales/count';
+        const countQueryParams = [];
+
+        // Apply the same filters to the count endpoint
+        if (userRole === 'Cashier' && userId) {
+          countQueryParams.push(`user_id=${userId}`);
+        }
+
+        if (userRole !== 'Admin' && branchId) {
+          countQueryParams.push(`branch_id=${branchId}`);
+        }
+
+        if (countQueryParams.length > 0) {
+          countUrl += '?' + countQueryParams.join('&');
+        }
+
+        console.log('Fetching sales count from:', countUrl);
+        const countResponse = await fetch(countUrl);
+
+        if (countResponse.ok) {
+          const countData = await countResponse.json();
+          console.log('Sales count received:', countData);
+          setTotalSalesCount(countData.total);
+        } else {
+          console.error('Failed to fetch sales count');
+        }
+
+        setLoadingCount(false);
+
+        // Now fetch the sales data
         console.log('Fetching sales from:', url);
         const response = await fetch(url);
 
@@ -214,6 +248,32 @@ const ViewSalesPage = () => {
       const userId = localStorage.getItem('userId');
       const branchId = localStorage.getItem('branchId');
 
+      // Refresh the count first
+      setLoadingCount(true);
+      let countUrl = 'http://localhost:3002/sales/count';
+      const countQueryParams = [];
+
+      // Apply the same filters to the count endpoint
+      if (userRole === 'Cashier' && userId) {
+        countQueryParams.push(`user_id=${userId}`);
+      }
+
+      if (userRole !== 'Admin' && branchId) {
+        countQueryParams.push(`branch_id=${branchId}`);
+      }
+
+      if (countQueryParams.length > 0) {
+        countUrl += '?' + countQueryParams.join('&');
+      }
+
+      const countResponse = await fetch(countUrl);
+      if (countResponse.ok) {
+        const countData = await countResponse.json();
+        setTotalSalesCount(countData.total);
+      }
+      setLoadingCount(false);
+
+      // Now refresh the sales data
       // Construct URL based on role and branch
       let refreshUrl = 'http://localhost:3002/sales';
       const queryParams = [];
@@ -348,7 +408,16 @@ const ViewSalesPage = () => {
             </div>
             <div>
               <h3 className="font-bold">Number of Sales</h3>
-              <p className="text-2xl font-bold">{filteredSales.length}</p>
+              {loadingCount ? (
+                <p className="text-2xl font-bold">Loading...</p>
+              ) : (
+                <>
+                  <p className="text-2xl font-bold">{totalSalesCount}</p>
+                  {filteredSales.length !== totalSalesCount && (
+                    <p className="text-xs text-gray-500">Showing {filteredSales.length} filtered sales</p>
+                  )}
+                </>
+              )}
             </div>
             <div className="flex gap-2">
               <button className="bg-white p-2 rounded-md border border-gray-300">

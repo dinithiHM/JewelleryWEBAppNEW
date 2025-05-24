@@ -88,7 +88,6 @@ export default function SupplierDashboard() {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [showOrderModal, setShowOrderModal] = useState(false);
   const [statusUpdate, setStatusUpdate] = useState('');
-  const [notes, setNotes] = useState('');
   const [activeItemTab, setActiveItemTab] = useState(0);
   const [selectedItem, setSelectedItem] = useState<OrderItem | null>(null);
   const router = useRouter();
@@ -175,19 +174,16 @@ export default function SupplierDashboard() {
         // Select the first item
         setSelectedItem(regularOrder.items[0]);
         setStatusUpdate(regularOrder.items[0].status || 'Pending');
-        setNotes(regularOrder.items[0].supplier_notes || '');
       } else {
         // No items, use the order status
         setSelectedItem(null);
         setStatusUpdate(regularOrder.status || 'Pending');
-        setNotes(regularOrder.supplier_notes || '');
       }
     } else {
       // For custom orders
       const customOrder = order as CustomOrder;
       setSelectedItem(null);
       setStatusUpdate(customOrder.order_status || 'Pending');
-      setNotes(customOrder.supplier_notes || '');
     }
 
     setShowOrderModal(true);
@@ -197,7 +193,6 @@ export default function SupplierDashboard() {
     setSelectedItem(item);
     setActiveItemTab(index);
     setStatusUpdate(item.status || 'Pending');
-    setNotes(item.supplier_notes || '');
   };
 
   const handleUpdateStatus = async () => {
@@ -211,22 +206,19 @@ export default function SupplierDashboard() {
         // For custom orders, update the whole order
         endpoint = `http://localhost:3002/custom-orders/${selectedOrder.order_id}/status`;
         payload = {
-          order_status: statusUpdate,
-          supplier_notes: notes,
+          order_status: statusUpdate
         };
       } else if (selectedItem) {
         // For regular orders with a selected item, update just that item
         endpoint = `http://localhost:3002/suppliers/update-order-item-status/${selectedItem.order_item_id}`;
         payload = {
-          status: statusUpdate,
-          supplier_notes: notes,
+          status: statusUpdate
         };
       } else {
         // For regular orders without items, update the whole order
         endpoint = `http://localhost:3002/suppliers/update-order-status/${selectedOrder.order_id}`;
         payload = {
-          status: statusUpdate,
-          supplier_notes: notes,
+          status: statusUpdate
         };
       }
 
@@ -255,7 +247,7 @@ export default function SupplierDashboard() {
         // Update custom order
         setCustomOrders(customOrders.map(order => {
           if (order.order_id === selectedOrder.order_id) {
-            return { ...order, order_status: statusUpdate, supplier_notes: notes };
+            return { ...order, order_status: statusUpdate };
           }
           return order;
         }));
@@ -266,7 +258,7 @@ export default function SupplierDashboard() {
             // Create a new array of items with the updated item
             const updatedItems = order.items.map(item => {
               if (item.order_item_id === selectedItem.order_item_id) {
-                return { ...item, status: statusUpdate, supplier_notes: notes };
+                return { ...item, status: statusUpdate };
               }
               return item;
             });
@@ -280,7 +272,7 @@ export default function SupplierDashboard() {
         // Update the regular order status
         setRegularOrders(regularOrders.map(order => {
           if (order.order_id === selectedOrder.order_id) {
-            return { ...order, status: statusUpdate, supplier_notes: notes };
+            return { ...order, status: statusUpdate };
           }
           return order;
         }));
@@ -851,20 +843,7 @@ export default function SupplierDashboard() {
                       </select>
                     </div>
 
-                    <div className="mt-4">
-                      <label htmlFor="notes" className="block text-sm font-medium text-gray-700">
-                        Notes
-                      </label>
-                      <textarea
-                        id="notes"
-                        name="notes"
-                        rows={3}
-                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-yellow-500 focus:border-yellow-500 sm:text-sm"
-                        placeholder="Add any notes about this order..."
-                        value={notes}
-                        onChange={(e) => setNotes(e.target.value)}
-                      ></textarea>
-                    </div>
+
                   </div>
                 </div>
               </div>

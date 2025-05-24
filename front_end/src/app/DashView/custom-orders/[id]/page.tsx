@@ -15,14 +15,15 @@ import {
   CheckCircle,
   AlertCircle,
   X,
-  Printer,
   RefreshCw,
   Send,
   Percent,
-  Hash
+  Hash,
+  Download
 } from 'lucide-react';
 import { formatCurrency } from '@/utils/formatters';
 import LKRIcon from '@/components/LKRIcon';
+import { generateCustomOrderReceipt } from '@/utils/customOrderReceipt';
 
 // Define types
 interface CustomOrderDetail {
@@ -396,6 +397,32 @@ const CustomOrderDetailPage = ({ params }: { params: Promise<{ id: string }> | {
     window.print();
   };
 
+  // Handle download receipt
+  const handleDownloadReceipt = async () => {
+    try {
+      if (!order) return;
+
+      // Generate PDF receipt
+      const pdfBlob = await generateCustomOrderReceipt(order);
+
+      // Create download link
+      const url = URL.createObjectURL(pdfBlob);
+      const link = document.createElement('a');
+      link.href = url;
+      const fileName = `Custom_Order_Receipt_${order.order_reference}.pdf`;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+
+      // Clean up
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Error generating receipt:', err);
+      alert('Failed to generate receipt. Please try again.');
+    }
+  };
+
   // Handle image selection
   const handleImageSelect = (imagePath: string) => {
     // Clean up the path to ensure it's just the filename
@@ -486,20 +513,20 @@ const CustomOrderDetailPage = ({ params }: { params: Promise<{ id: string }> | {
         </div>
         <div className="flex space-x-2">
           <button
-            onClick={handlePrint}
-            className="flex items-center px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-md text-gray-700"
+            onClick={handleDownloadReceipt}
+            className="flex items-center px-3 py-2 bg-yellow-500 hover:bg-yellow-600 rounded-md text-white"
           >
-            <Printer size={16} className="mr-1" />
-            Print
+            <Download size={16} className="mr-1" />
+            Download Receipt
           </button>
           <button
             onClick={() => fetchOrderDetails(true)}
-            className="flex items-center px-3 py-2 bg-yellow-500 hover:bg-yellow-600 rounded-md text-white"
+            className="flex items-center px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-md text-gray-700"
             disabled={refreshing}
           >
             {refreshing ? (
               <>
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-1"></div>
+                <div className="w-4 h-4 border-2 border-gray-700 border-t-transparent rounded-full animate-spin mr-1"></div>
                 Refreshing...
               </>
             ) : (

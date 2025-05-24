@@ -4,7 +4,6 @@ import React, { useState, useEffect } from 'react';
 import {
   TrendingUp,
   Calendar,
-  Download,
   RefreshCw,
   CreditCard,
   Building,
@@ -65,7 +64,6 @@ export default function FinancialReportPage() {
   const [period, setPeriod] = useState('last30');
   const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null);
   const [branches, setBranches] = useState<any[]>([]);
-  const [exportFormat, setExportFormat] = useState('pdf');
 
   // Format currency
   const formatCurrency = (amount: number) => {
@@ -138,41 +136,7 @@ export default function FinancialReportPage() {
     }
   };
 
-  // Export report
-  const exportReport = async (format: string) => {
-    try {
-      const params: any = {
-        reportType: 'financial',
-        period,
-        format
-      };
 
-      if (selectedBranchId) params.branchId = selectedBranchId;
-
-      const response = await axios.get(`http://localhost:3002/api/reports/export`, {
-        params,
-        responseType: format === 'csv' ? 'blob' : 'json'
-      });
-
-      if (format === 'csv') {
-        // Handle CSV download
-        const url = window.URL.createObjectURL(new Blob([response.data]));
-        const link = document.createElement('a');
-        link.href = url;
-        link.setAttribute('download', `financial_report_${new Date().toISOString().split('T')[0]}.csv`);
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-      } else {
-        // Handle PDF generation (client-side)
-        // This would typically use a library like jsPDF or pdfmake
-        alert('PDF export functionality would be implemented here');
-      }
-    } catch (err: any) {
-      console.error('Error exporting report:', err);
-      alert('Failed to export report');
-    }
-  };
 
   // Load data on component mount and when filters change
   useEffect(() => {
@@ -275,24 +239,6 @@ export default function FinancialReportPage() {
             <RefreshCw className="mr-1 h-4 w-4" />
             Refresh
           </button>
-
-          <div className="relative">
-            <button
-              onClick={() => exportReport(exportFormat)}
-              className="px-3 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-md flex items-center text-sm"
-            >
-              <Download className="mr-1 h-4 w-4" />
-              Export {exportFormat.toUpperCase()}
-            </button>
-            <select
-              value={exportFormat}
-              onChange={(e) => setExportFormat(e.target.value)}
-              className="absolute right-0 top-0 w-10 h-full opacity-0 cursor-pointer"
-            >
-              <option value="pdf">PDF</option>
-              <option value="csv">CSV</option>
-            </select>
-          </div>
         </div>
       </div>
 

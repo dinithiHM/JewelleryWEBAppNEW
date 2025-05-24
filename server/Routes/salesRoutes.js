@@ -9,6 +9,45 @@ const __dirname = path.dirname(__filename);
 
 const router = express.Router();
 
+// Get total count of sales
+router.get("/count", (req, res) => {
+  console.log('GET /sales/count - Getting total count of sales');
+
+  // Get query parameters
+  const branchId = req.query.branch_id;
+  const userId = req.query.user_id;
+
+  // Build SQL query to count sales
+  let sql = "SELECT COUNT(*) as total FROM sales";
+
+  // Add WHERE clause if filters are provided
+  const whereConditions = [];
+  const queryParams = [];
+
+  if (branchId) {
+    whereConditions.push('branch_id = ?');
+    queryParams.push(branchId);
+  }
+
+  if (userId) {
+    whereConditions.push('user_id = ?');
+    queryParams.push(userId);
+  }
+
+  if (whereConditions.length > 0) {
+    sql += ' WHERE ' + whereConditions.join(' AND ');
+  }
+
+  con.query(sql, queryParams, (err, results) => {
+    if (err) {
+      console.error("Error counting sales:", err);
+      return res.status(500).json({ message: "Database error", error: err.message });
+    }
+
+    res.json({ total: results[0].total });
+  });
+});
+
 // Get all sales with their items
 router.get("/", (req, res) => {
   // Get query parameters
