@@ -9,7 +9,7 @@ import UserCard from "@/components/UserCard";
 import { useLanguage } from "@/contexts/LanguageContext";
 
 const AdminPage = () => {
-  // Use language context to trigger re-renders when language changes
+  // Use language context  when language changes
   useLanguage();
   return (
     <div className="p-4 flex gap-4 flex-col md:flex-row">

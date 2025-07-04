@@ -1,7 +1,8 @@
 import jwt from "jsonwebtoken";
 
 const verifyToken = (req, res, next) => {
-  
+  // TEMPORARY: Allow all requests to reports routes without authentication
+  // This is for testing purposes only and should be removed in production
   if (req.originalUrl.includes('/api/reports')) {
     console.log('BYPASSING AUTH: Allowing access to reports route without token');
     req.user = { id: 1, role: 'admin' }; // Set a default admin user

@@ -679,7 +679,7 @@ const CustomOrderDetailPage = ({ params }: { params: Promise<{ id: string }> | {
                     <p className="text-sm font-semibold text-gray-900">{formatCurrency(order.estimated_amount)}</p>
                   </div>
                 </div>
-              ) : (
+               ) : (
                 // Other users see the total amount with profit
                 <>
                   {order.profit_percentage !== undefined && (
@@ -709,7 +709,7 @@ const CustomOrderDetailPage = ({ params }: { params: Promise<{ id: string }> | {
 
                   <div className="flex items-start">
                     <LKRIcon className="h-5 w-5 text-gray-400 mr-2 mt-0.5" />
-                    <div>
+                    {/* <div>
                       <p className="text-sm font-medium text-gray-500">Total Amount (Customer Price)</p>
                       <p className="text-sm font-semibold text-gray-900">
                         {formatCurrency(
@@ -719,12 +719,33 @@ const CustomOrderDetailPage = ({ params }: { params: Promise<{ id: string }> | {
                                 ? ((order.estimated_amount * (order.profit_percentage / 100)) + order.estimated_amount) * (order.quantity || 1)
                                 : order.estimated_amount * (order.quantity || 1))
                         )}
+
+               
                       </p>
                       {order.profit_percentage !== undefined && (
                         <p className="text-xs text-gray-500">
                           Includes {order.profit_percentage}% profit: {formatCurrency(order.estimated_amount * (order.profit_percentage / 100))} × {order.quantity || 1} items
                         </p>
                       )}
+                    </div> */}
+
+                    <div>
+              <p className="text-sm font-medium text-gray-500">Total Amount (Customer Price)</p>
+              <p className="text-sm font-semibold text-gray-900">
+                  {(() => {
+                    const quantity = order.quantity || 1;
+                    const supplierTotal = order.estimated_amount * quantity;
+                    const profitPerItem = order.estimated_amount * (order.profit_percentage ? order.profit_percentage / 100 : 0);
+                    const profitTotal = profitPerItem * quantity;
+                    const totalAmount = supplierTotal + profitTotal;
+                    return formatCurrency(totalAmount);
+                  })()}
+                  </p>
+                  {order.profit_percentage !== undefined && (
+                    <p className="text-xs text-gray-500">
+                      (Supplier: {formatCurrency(order.estimated_amount * (order.quantity || 1))} + Profit: {formatCurrency((order.estimated_amount * (order.profit_percentage / 100)) * (order.quantity || 1))})
+                    </p>
+                       )}
                     </div>
                   </div>
                 </>

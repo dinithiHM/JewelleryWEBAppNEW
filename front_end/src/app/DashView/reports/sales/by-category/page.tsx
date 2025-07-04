@@ -1,5 +1,12 @@
 "use client";
 
+declare global {
+  interface Window {
+    chartData?: any[];
+    categoryQuantities?: { [key: string]: number };
+  }
+}
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Calendar, Filter, Download, Printer, PieChart as PieChartIcon, RefreshCw, ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
@@ -104,13 +111,15 @@ export default function SalesByCategoryReportPage() {
         // Store chart data for the pie chart
         window.chartData = salesData.topCategories.map(category => ({
           name: category.category_name,
-          value: parseFloat(category.totalAmount) || 0
+           value: parseFloat(category.totalAmount.toString()) || 0
         }));
 
         // Store quantity data separately for PDF export
-        window.categoryQuantities = {};
+        if (!window.categoryQuantities) {
+          window.categoryQuantities = {};
+        }
         salesData.topCategories.forEach(category => {
-          window.categoryQuantities[category.category_name] = category.totalQuantity;
+          window.categoryQuantities![category.category_name] = category.totalQuantity;
         });
 
         // Force a re-render of the chart
@@ -137,7 +146,7 @@ export default function SalesByCategoryReportPage() {
     // Parse the totalAmount as a number to ensure it's treated as a numeric value
     return salesData.topCategories.map(category => ({
       name: category.category_name,
-      value: parseFloat(category.totalAmount) || 0
+      value: parseFloat(category.totalAmount.toString()) || 0
     }));
   };
 

@@ -1,0 +1,135 @@
+<mxfile host="Electron" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/24.7.17 Chrome/128.0.6613.36 Electron/32.0.1 Safari/537.36" version="24.7.17">
+  <diagram name="Page-1" id="c93AFHwlsbIo-_jMMOhD">
+    <mxGraphModel dx="1518" dy="1831" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="xxmeabHHSh_2cT_IIZDM-5" value="Start" style="rounded=1;whiteSpace=wrap;arcSize=50;strokeWidth=2;" parent="1" vertex="1">
+          <mxGeometry x="259" y="45" width="58" height="33" as="geometry" />
+        </mxCell>
+        <mxCell id="xxmeabHHSh_2cT_IIZDM-6" value="Open Advance Payment Form" style="whiteSpace=wrap;strokeWidth=2;" parent="1" vertex="1">
+          <mxGeometry x="175" y="128" width="228" height="66" as="geometry" />
+        </mxCell>
+        <mxCell id="xxmeabHHSh_2cT_IIZDM-7" value="Enter Order ID" style="whiteSpace=wrap;strokeWidth=2;" parent="1" vertex="1">
+          <mxGeometry x="270" y="244" width="163" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="xxmeabHHSh_2cT_IIZDM-19" value="" style="curved=1;startArrow=none;endArrow=block;exitX=0.51;exitY=1.01;entryX=0.5;entryY=0.01;rounded=0;" parent="1" source="xxmeabHHSh_2cT_IIZDM-5" target="xxmeabHHSh_2cT_IIZDM-6" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="xxmeabHHSh_2cT_IIZDM-20" value="" style="startArrow=none;endArrow=block;exitX=0.776;exitY=1.006;entryX=0.5;entryY=0.01;rounded=0;exitDx=0;exitDy=0;exitPerimeter=0;" parent="1" source="xxmeabHHSh_2cT_IIZDM-6" target="xxmeabHHSh_2cT_IIZDM-7" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="xxmeabHHSh_2cT_IIZDM-21" value="" style="curved=1;startArrow=none;endArrow=block;exitX=1;exitY=0.5;entryX=-0.007;entryY=0.382;rounded=0;exitDx=0;exitDy=0;entryDx=0;entryDy=0;entryPerimeter=0;" parent="1" source="xxmeabHHSh_2cT_IIZDM-7" target="xxmeabHHSh_2cT_IIZDM-8" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="xxmeabHHSh_2cT_IIZDM-24" value="" style="startArrow=none;endArrow=block;exitX=0.47;exitY=0;entryX=0.13;entryY=1.01;rounded=0;edgeStyle=orthogonalEdgeStyle;" parent="1" source="xxmeabHHSh_2cT_IIZDM-10" target="xxmeabHHSh_2cT_IIZDM-6" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="85LRlIAfu_c1aVBc82Wj-1" value="Activity Diagram for the &quot;Collect Advance Payment&quot;" style="swimlane;childLayout=stackLayout;resizeParent=1;resizeParentMax=0;startSize=20;html=1;" vertex="1" parent="1">
+          <mxGeometry x="130.00000000000045" y="-40" width="791" height="1630" as="geometry" />
+        </mxCell>
+        <mxCell id="85LRlIAfu_c1aVBc82Wj-2" value="Sales Associate / Cashier" style="swimlane;startSize=20;html=1;" vertex="1" parent="85LRlIAfu_c1aVBc82Wj-1">
+          <mxGeometry y="20" width="340" height="1610" as="geometry" />
+        </mxCell>
+        <mxCell id="xxmeabHHSh_2cT_IIZDM-12" value="Payment Method?" style="rhombus;strokeWidth=2;whiteSpace=wrap;" parent="85LRlIAfu_c1aVBc82Wj-2" vertex="1">
+          <mxGeometry x="134.49999999999955" y="790" width="174" height="174" as="geometry" />
+        </mxCell>
+        <mxCell id="xxmeabHHSh_2cT_IIZDM-14" value="Process Card Payment" style="whiteSpace=wrap;strokeWidth=2;" parent="85LRlIAfu_c1aVBc82Wj-2" vertex="1">
+          <mxGeometry x="14.5" y="1045" width="120" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="xxmeabHHSh_2cT_IIZDM-28" value="Card" style="startArrow=none;endArrow=block;entryX=0.5;entryY=-0.01;rounded=0;edgeStyle=orthogonalEdgeStyle;" parent="85LRlIAfu_c1aVBc82Wj-2" target="xxmeabHHSh_2cT_IIZDM-14" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="129.99999999999955" y="880" as="sourcePoint" />
+            <Array as="points">
+              <mxPoint x="75" y="880" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="xxmeabHHSh_2cT_IIZDM-13" value="Process Cash Payment" style="whiteSpace=wrap;strokeWidth=2;" parent="85LRlIAfu_c1aVBc82Wj-2" vertex="1">
+          <mxGeometry x="186.99999999999955" y="1048" width="153" height="24" as="geometry" />
+        </mxCell>
+        <mxCell id="xxmeabHHSh_2cT_IIZDM-27" value="Cash" style="startArrow=none;endArrow=block;exitX=1;exitY=0.5;entryX=0.866;entryY=0;rounded=0;edgeStyle=orthogonalEdgeStyle;exitDx=0;exitDy=0;entryDx=0;entryDy=0;entryPerimeter=0;" parent="85LRlIAfu_c1aVBc82Wj-2" source="xxmeabHHSh_2cT_IIZDM-12" target="xxmeabHHSh_2cT_IIZDM-13" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="xxmeabHHSh_2cT_IIZDM-15" value="Confirm Payment" style="whiteSpace=wrap;strokeWidth=2;" parent="85LRlIAfu_c1aVBc82Wj-2" vertex="1">
+          <mxGeometry x="78.49999999999955" y="1230" width="183" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="xxmeabHHSh_2cT_IIZDM-29" value="" style="startArrow=none;endArrow=block;exitX=0.5;exitY=1;entryX=0.86;entryY=0;rounded=0;edgeStyle=orthogonalEdgeStyle;" parent="85LRlIAfu_c1aVBc82Wj-2" source="xxmeabHHSh_2cT_IIZDM-13" target="xxmeabHHSh_2cT_IIZDM-15" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="xxmeabHHSh_2cT_IIZDM-30" value="" style="startArrow=none;endArrow=block;exitX=0.5;exitY=1;entryX=0.14;entryY=0;rounded=0;edgeStyle=orthogonalEdgeStyle;" parent="85LRlIAfu_c1aVBc82Wj-2" source="xxmeabHHSh_2cT_IIZDM-14" target="xxmeabHHSh_2cT_IIZDM-15" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="85LRlIAfu_c1aVBc82Wj-3" value="System" style="swimlane;startSize=20;html=1;" vertex="1" parent="85LRlIAfu_c1aVBc82Wj-1">
+          <mxGeometry x="340" y="20" width="451" height="1610" as="geometry" />
+        </mxCell>
+        <mxCell id="xxmeabHHSh_2cT_IIZDM-8" value="Validate Order ID" style="whiteSpace=wrap;strokeWidth=2;" parent="85LRlIAfu_c1aVBc82Wj-3" vertex="1">
+          <mxGeometry x="198.99999999999955" y="270" width="184" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="xxmeabHHSh_2cT_IIZDM-9" value="Is Order ID valid?" style="rhombus;strokeWidth=2;whiteSpace=wrap;" parent="85LRlIAfu_c1aVBc82Wj-3" vertex="1">
+          <mxGeometry x="205.99999999999955" y="400" width="170" height="170" as="geometry" />
+        </mxCell>
+        <mxCell id="xxmeabHHSh_2cT_IIZDM-22" value="" style="curved=1;startArrow=none;endArrow=block;exitX=0.5;exitY=1;entryX=0.5;entryY=0;rounded=0;" parent="85LRlIAfu_c1aVBc82Wj-3" source="xxmeabHHSh_2cT_IIZDM-8" target="xxmeabHHSh_2cT_IIZDM-9" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="xxmeabHHSh_2cT_IIZDM-11" value="Enter Advance Amount &amp; Payment Method" style="whiteSpace=wrap;strokeWidth=2;" parent="85LRlIAfu_c1aVBc82Wj-3" vertex="1">
+          <mxGeometry x="188.99999999999955" y="760" width="232" height="66" as="geometry" />
+        </mxCell>
+        <mxCell id="xxmeabHHSh_2cT_IIZDM-25" value="Yes" style="startArrow=none;endArrow=block;exitX=1;exitY=0.5;rounded=0;exitDx=0;exitDy=0;entryX=0.862;entryY=-0.013;entryDx=0;entryDy=0;entryPerimeter=0;" parent="85LRlIAfu_c1aVBc82Wj-3" source="xxmeabHHSh_2cT_IIZDM-9" target="xxmeabHHSh_2cT_IIZDM-11" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="389" y="485" />
+            </Array>
+            <mxPoint x="414.99999999999955" y="488" as="sourcePoint" />
+            <mxPoint x="388.99999999999955" y="753" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="xxmeabHHSh_2cT_IIZDM-10" value="Show Error Message" style="whiteSpace=wrap;strokeWidth=2;" parent="85LRlIAfu_c1aVBc82Wj-3" vertex="1">
+          <mxGeometry x="20" y="471" width="140" height="39" as="geometry" />
+        </mxCell>
+        <mxCell id="xxmeabHHSh_2cT_IIZDM-23" value="No" style="startArrow=none;endArrow=block;exitX=0;exitY=0.5;rounded=0;exitDx=0;exitDy=0;" parent="85LRlIAfu_c1aVBc82Wj-3" source="xxmeabHHSh_2cT_IIZDM-9" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="159" y="485" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="xxmeabHHSh_2cT_IIZDM-16" value="Save Advance Payment Record" style="whiteSpace=wrap;strokeWidth=2;" parent="85LRlIAfu_c1aVBc82Wj-3" vertex="1">
+          <mxGeometry x="139.99999999999955" y="1230" width="223" height="66" as="geometry" />
+        </mxCell>
+        <mxCell id="xxmeabHHSh_2cT_IIZDM-17" value="Update Order Status" style="whiteSpace=wrap;strokeWidth=2;" parent="85LRlIAfu_c1aVBc82Wj-3" vertex="1">
+          <mxGeometry x="148.49999999999955" y="1400" width="206" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="xxmeabHHSh_2cT_IIZDM-32" value="" style="curved=1;startArrow=none;endArrow=block;exitX=0.5;exitY=1.01;entryX=0.5;entryY=0.01;rounded=0;" parent="85LRlIAfu_c1aVBc82Wj-3" source="xxmeabHHSh_2cT_IIZDM-16" target="xxmeabHHSh_2cT_IIZDM-17" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="xxmeabHHSh_2cT_IIZDM-18" value="End" style="rounded=1;whiteSpace=wrap;arcSize=50;strokeWidth=2;" parent="85LRlIAfu_c1aVBc82Wj-3" vertex="1">
+          <mxGeometry x="226.49999999999955" y="1530" width="50" height="33" as="geometry" />
+        </mxCell>
+        <mxCell id="xxmeabHHSh_2cT_IIZDM-33" value="" style="curved=1;startArrow=none;endArrow=block;exitX=0.5;exitY=1.02;entryX=0.49;entryY=-0.01;rounded=0;" parent="85LRlIAfu_c1aVBc82Wj-3" source="xxmeabHHSh_2cT_IIZDM-17" target="xxmeabHHSh_2cT_IIZDM-18" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="xxmeabHHSh_2cT_IIZDM-26" value="" style="startArrow=none;endArrow=block;exitX=0.001;exitY=0.138;entryX=0.5;entryY=0;rounded=0;exitDx=0;exitDy=0;exitPerimeter=0;" parent="85LRlIAfu_c1aVBc82Wj-1" source="xxmeabHHSh_2cT_IIZDM-11" target="xxmeabHHSh_2cT_IIZDM-12" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="219.99999999999955" y="790" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="xxmeabHHSh_2cT_IIZDM-31" value="" style="curved=1;startArrow=none;endArrow=block;exitX=1;exitY=0.5;entryX=-0.009;entryY=0.383;rounded=0;exitDx=0;exitDy=0;entryDx=0;entryDy=0;entryPerimeter=0;" parent="85LRlIAfu_c1aVBc82Wj-1" source="xxmeabHHSh_2cT_IIZDM-15" target="xxmeabHHSh_2cT_IIZDM-16" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points" />
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

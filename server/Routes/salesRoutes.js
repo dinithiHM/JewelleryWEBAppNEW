@@ -114,7 +114,7 @@ router.get("/", (req, res) => {
 });
 
 // Get finance data (income and expenses) by period and branch
-// Important: This route must be defined BEFORE the /:id route to avoid being caught by it
+
 router.get("/finance", (req, res) => {
   console.log('GET /sales/finance - Fetching finance data');
 
